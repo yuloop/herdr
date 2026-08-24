@@ -118,6 +118,14 @@ impl App {
         self.dispatch_runtime_mutation(id, Method::PaneRename(params))
     }
 
+    pub(crate) fn runtime_pane_input_set(
+        &mut self,
+        id: &'static str,
+        params: PaneInputSetParams,
+    ) -> String {
+        self.dispatch_runtime_mutation(id, Method::PaneInputSet(params))
+    }
+
     pub(crate) fn runtime_pane_focus_direction(
         &mut self,
         id: &'static str,

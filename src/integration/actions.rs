@@ -144,10 +144,20 @@ fn install_target_inner(target: crate::api::schema::IntegrationTarget) -> io::Re
         }
         crate::api::schema::IntegrationTarget::Opencode => {
             let installed = install_opencode()?;
-            vec![format!(
-                "installed opencode integration plugin to {}",
-                installed.plugin_path.display()
-            )]
+            vec![
+                format!(
+                    "installed opencode integration plugin to {}",
+                    installed.plugin_path.display()
+                ),
+                format!(
+                    "installed opencode tui integration plugin to {}",
+                    installed.tui_plugin_path.display()
+                ),
+                format!(
+                    "ensured opencode tui plugin config at {}",
+                    installed.tui_config_path.display()
+                ),
+            ]
         }
         crate::api::schema::IntegrationTarget::Kilo => {
             let installed = install_kilo()?;
@@ -191,6 +201,19 @@ fn install_target_inner(target: crate::api::schema::IntegrationTarget) -> io::Re
                 ),
                 format!(
                     "ensured qodercli settings at {}",
+                    installed.settings_path.display()
+                ),
+            ]
+        }
+        crate::api::schema::IntegrationTarget::Qwen => {
+            let installed = install_qwen()?;
+            vec![
+                format!(
+                    "installed qwen integration hook to {}",
+                    installed.hook_path.display()
+                ),
+                format!(
+                    "ensured qwen settings at {}",
                     installed.settings_path.display()
                 ),
             ]
@@ -464,17 +487,35 @@ pub(crate) fn uninstall_target(
         }
         crate::api::schema::IntegrationTarget::Opencode => {
             let result = uninstall_opencode()?;
-            if result.removed_plugin {
-                vec![format!(
+            let mut messages = vec![if result.removed_plugin {
+                format!(
                     "removed opencode integration plugin at {}",
                     result.plugin_path.display()
-                )]
+                )
             } else {
-                vec![format!(
+                format!(
                     "no opencode integration plugin found at {}",
                     result.plugin_path.display()
-                )]
+                )
+            }];
+            messages.push(if result.removed_tui_plugin {
+                format!(
+                    "removed opencode tui integration plugin at {}",
+                    result.tui_plugin_path.display()
+                )
+            } else {
+                format!(
+                    "no opencode tui integration plugin found at {}",
+                    result.tui_plugin_path.display()
+                )
+            });
+            if result.updated_tui_config {
+                messages.push(format!(
+                    "removed herdr opencode plugin entry from {}",
+                    result.tui_config_path.display()
+                ));
             }
+            messages
         }
         crate::api::schema::IntegrationTarget::Kilo => {
             let result = uninstall_kilo()?;
@@ -566,6 +607,33 @@ pub(crate) fn uninstall_target(
             } else {
                 messages.push(format!(
                     "no herdr qodercli hook entries found in {}",
+                    result.settings_path.display()
+                ));
+            }
+            messages
+        }
+        crate::api::schema::IntegrationTarget::Qwen => {
+            let result = uninstall_qwen()?;
+            let mut messages = Vec::new();
+            if result.removed_hook_file {
+                messages.push(format!(
+                    "removed qwen hook at {}",
+                    result.hook_path.display()
+                ));
+            } else {
+                messages.push(format!(
+                    "no qwen hook found at {}",
+                    result.hook_path.display()
+                ));
+            }
+            if result.updated_settings {
+                messages.push(format!(
+                    "removed herdr qwen hook entries from {}",
+                    result.settings_path.display()
+                ));
+            } else {
+                messages.push(format!(
+                    "no herdr qwen hook entries found in {}",
                     result.settings_path.display()
                 ));
             }

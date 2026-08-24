@@ -16,7 +16,10 @@ pub fn encode_key(key: KeyEvent, protocol: KeyboardProtocol) -> Vec<u8> {
 }
 
 pub fn encode_terminal_key(key: TerminalKey, protocol: KeyboardProtocol) -> Vec<u8> {
-    if key.kind != crossterm::event::KeyEventKind::Release {
+    // REPORT_ALL_KEYS must retain physical press/repeat/release semantics instead of
+    // reducing a native key to its layout-generated text.
+    let preserve_physical_key = key.has_physical_identity() && protocol.reports_all_keys();
+    if !preserve_physical_key && key.kind != crossterm::event::KeyEventKind::Release {
         if let Some(text) = &key.generated_text {
             return text.as_bytes().to_vec();
         }
@@ -125,7 +128,7 @@ fn encode_mouse_cb(
     encoding: MouseProtocolEncoding,
 ) -> Option<Vec<u8>> {
     let mut cb = match (encoding, release) {
-        (MouseProtocolEncoding::Sgr, true) => base_button,
+        (MouseProtocolEncoding::Sgr | MouseProtocolEncoding::SgrPixels, true) => base_button,
         (_, true) => 3,
         (_, false) => base_button,
     };
@@ -143,7 +146,7 @@ fn encode_mouse_cb(
     let row = row as u32 + 1;
 
     match encoding {
-        MouseProtocolEncoding::Sgr => Some(
+        MouseProtocolEncoding::Sgr | MouseProtocolEncoding::SgrPixels => Some(
             format!(
                 "\x1b[<{cb};{column};{row}{}",
                 if release { 'm' } else { 'M' }

@@ -9,7 +9,7 @@
   <a href="https://herdr.dev">herdr.dev</a> · <a href="#安装">安装</a> · <a href="https://herdr.dev/zh-cn/docs/quick-start/">快速开始</a> · <a href="https://herdr.dev/zh-cn/docs/">文档</a></p>
 
 <p align="center">
-  <a href="README.md">English</a> · 简体中文
+  <a href="https://github.com/herdrdev/herdr#readme">English（上游）</a> · 简体中文
 </p>
 
 <p align="center">

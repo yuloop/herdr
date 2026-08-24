@@ -1,0 +1,151 @@
+name: Herdr Chinese Release
+on:
+  schedule:
+    - cron: "17 3 * * *"   # 每天 03:17，避开备份/其他流水线
+  workflow_dispatch:
+permissions:
+  contents: write
+env:
+  RUST_TOOLCHAIN_VERSION: 1.96.1
+  LIBGHOSTTY_VT_OPTIMIZE: ReleaseFast
+  LIBGHOSTTY_VT_SIMD: "true"
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.res.outputs.should_build }}
+      tag: ${{ steps.res.outputs.tag }}
+      ver: ${{ steps.res.outputs.ver }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Resolve upstream version
+        id: res
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/herdrdev/herdr.git" || true
+          git fetch --tags upstream master
+          UP_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          echo "upstream latest tag: ${UP_TAG:-none}"
+          if [ -z "$UP_TAG" ]; then echo "should_build=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          VER="${UP_TAG#v}"
+          # 汉化版 tag：v<ver>-cn
+          CN_TAG="v${VER}-cn"
+          # 已发过且上游没更新 → 跳过（防止每天重复构建覆盖）
+          if git rev-parse -q --verify "refs/tags/${CN_TAG}" >/dev/null 2>&1; then
+            echo "汉化 tag ${CN_TAG} 已存在，检查上游是否更新"
+            CARGO_VER=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+            if [ "${VER}" = "${CARGO_VER}" ]; then
+              echo "上游无新版本，跳过"
+              echo "should_build=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "should_build=true" >> "$GITHUB_OUTPUT"
+          echo "tag=${CN_TAG}" >> "$GITHUB_OUTPUT"
+          echo "ver=${VER}" >> "$GITHUB_OUTPUT"
+  build:
+    needs: resolve
+    if: needs.resolve.outputs.should_build == 'true'
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: herdr-cn-${{ needs.resolve.outputs.ver }}-linux-x64
+            ext: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            name: herdr-cn-${{ needs.resolve.outputs.ver }}-windows-x64
+            ext: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          targets: ${{ matrix.target }}
+      - name: Install Zig
+        # build.rs 的 vendored libghostty-vt 在 Linux/Windows 都需要 zig（上游同款逻辑）
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+      - name: Install Windows build tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
+            choco install cmake ninja -y --no-progress
+          }
+      - name: Build release binary
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: target
+        run: |
+          cargo build --release --locked --bin herdr --target ${{ matrix.target }}
+          ls -la target/${{ matrix.target }}/release/herdr* | head -5
+      - name: Package Linux tarball
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/herdr dist/herdr
+          tar -czf dist/${{ matrix.name }}.tar.gz -C dist herdr
+          sha256sum dist/${{ matrix.name }}.tar.gz
+      - name: Package Windows zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "target\${{ matrix.target }}\release\herdr.exe" dist\herdr.exe
+          Compress-Archive -Path dist\herdr.exe -DestinationPath "dist\${{ matrix.name }}.zip" -Force
+          Get-FileHash "dist\${{ matrix.name }}.zip" -Algorithm SHA256
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*.${{ matrix.ext }}
+          if-no-files-found: error
+  publish:
+    needs: [resolve, build]
+    if: needs.resolve.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+      - name: Compute SHA256SUMS
+        run: |
+          cd dist
+          sha256sum herdr-cn-*.tar.gz herdr-cn-*.zip > SHA256SUMS
+          ls -la
+      - name: Create/Update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          name: herdr 汉化版 ${{ needs.resolve.outputs.tag }}
+          body: |
+            herdr 汉化版 ${{ needs.resolve.outputs.tag }}（基于上游 v${{ needs.resolve.outputs.ver }}）
+
+            - Linux x64 / Windows x64 双平台预编译
+            - 安装：`herdr cn-install` 或下载对应压缩包解压
+          files: dist/*.tar.gz,dist/*.zip,dist/SHA256SUMS
+          overwrite_files: true
+          make_latest: true
+          fail_on_unmatched_files: true

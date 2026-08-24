@@ -10,7 +10,7 @@ use super::{
     AUTO_UPDATE_CHECK_INTERVAL, MIN_RENDER_INTERVAL, RESIZE_POLL_INTERVAL,
     SELECTION_AUTOSCROLL_INTERVAL,
 };
-fn retain_custom_command_after_wait(
+fn retain_detached_process_after_wait(
     pid: u32,
     result: std::io::Result<Option<std::process::ExitStatus>>,
 ) -> bool {
@@ -19,16 +19,16 @@ fn retain_custom_command_after_wait(
         Ok(Some(_)) => false,
         Err(err) if err.kind() == std::io::ErrorKind::Interrupted => true,
         Err(err) => {
-            tracing::warn!(pid, err = %err, "failed to reap detached custom command");
+            tracing::warn!(pid, err = %err, "failed to reap detached process");
             false
         }
     }
 }
 
 impl App {
-    pub(crate) fn reap_finished_custom_commands(&mut self) {
-        self.detached_custom_command_children
-            .retain_mut(|child| retain_custom_command_after_wait(child.id(), child.try_wait()));
+    pub(crate) fn reap_finished_detached_processes(&mut self) {
+        self.detached_process_children
+            .retain_mut(|child| retain_detached_process_after_wait(child.id(), child.try_wait()));
     }
 
     pub(crate) fn shutdown_terminal_runtime(&mut self, terminal_id: crate::terminal::TerminalId) {
@@ -62,6 +62,11 @@ impl App {
         msg: crate::api::ApiRequestMessage,
     ) -> bool {
         let previous_mode = self.state.mode;
+        let stream_open = match &msg.request.method {
+            crate::api::schema::Method::PaneGraphicsStreamOpen(params) => Some(params.clone()),
+            _ => None,
+        };
+        let stream_active = msg.stream_active.clone();
         let mut changed = self.expire_due_metadata(Instant::now());
         changed |= crate::api::request_changes_ui(&msg.request);
         let skip_default_workspace = matches!(
@@ -84,6 +89,9 @@ impl App {
             return changed | deferred_changed;
         }
         let response = self.handle_api_request(msg.request);
+        if let (Some(params), Some(active)) = (stream_open.as_ref(), stream_active) {
+            self.attach_pane_graphics_stream_active(params, active, &response);
+        }
         if !skip_default_workspace {
             changed |= self.ensure_default_workspace();
         }
@@ -378,6 +386,7 @@ impl App {
         }
 
         changed |= self.expire_due_metadata(now);
+        changed |= self.handle_tab_bar_status_tasks(now);
 
         if geometry_dirty || resized {
             self.pending_agent_resume_deadline = None;
@@ -526,6 +535,22 @@ impl App {
         }
     }
 
+    pub(crate) fn can_present_now(&self, now: Instant) -> bool {
+        match self.last_presentation_at {
+            Some(last_presentation_at) => {
+                now.duration_since(last_presentation_at) >= MIN_RENDER_INTERVAL
+            }
+            None => true,
+        }
+    }
+
+    pub(crate) fn record_render_attempt(&mut self, now: Instant, presentation: bool) {
+        self.last_render_at = Some(now);
+        if presentation {
+            self.last_presentation_at = Some(now);
+        }
+    }
+
     pub(crate) fn run_auto_update_check(&mut self) {
         if !background_version_update_check_enabled(
             self.no_session,
@@ -606,6 +631,7 @@ impl App {
             self.session_save_deadline,
             self.selection_autoscroll_deadline,
             self.selection_highlight_clear_deadline,
+            self.next_tab_bar_status_deadline(),
             render_deadline,
         ]
         .into_iter()
@@ -652,10 +678,24 @@ mod tests {
     use crate::workspace::Workspace;
 
     #[test]
-    fn interrupted_custom_command_wait_keeps_child_for_retry() {
+    fn hidden_render_attempt_keeps_presentation_cadence_available() {
+        let (mut app, _) = test_app_with_pane();
+        let initial_presentation = Instant::now();
+        app.record_render_attempt(initial_presentation, true);
+
+        let hidden_attempt = initial_presentation + MIN_RENDER_INTERVAL;
+        app.record_render_attempt(hidden_attempt, false);
+        let foreground_echo = hidden_attempt + Duration::from_millis(1);
+
+        assert!(!app.can_render_now(foreground_echo));
+        assert!(app.can_present_now(foreground_echo));
+    }
+
+    #[test]
+    fn interrupted_detached_process_wait_keeps_child_for_retry() {
         let interrupted = std::io::Error::new(std::io::ErrorKind::Interrupted, "test interrupt");
 
-        assert!(retain_custom_command_after_wait(42, Err(interrupted)));
+        assert!(retain_detached_process_after_wait(42, Err(interrupted)));
     }
 
     fn test_app_with_pane() -> (super::super::App, crate::layout::PaneId) {

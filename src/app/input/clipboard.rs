@@ -42,7 +42,7 @@ impl App {
                 .state
                 .selection
                 .as_ref()
-                .is_some_and(crate::selection::Selection::is_finalized)
+                .is_some_and(crate::selection::Selection::is_visible)
         {
             return false;
         }
@@ -65,6 +65,7 @@ impl App {
         }
 
         self.state.copy_selection(&self.terminal_runtimes);
+        self.selection_autoscroll_deadline = None;
         if !self.dispatch_pending_clipboard_write() {
             return false;
         }

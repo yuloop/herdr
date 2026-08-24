@@ -21,7 +21,19 @@
 - Windows clients started normally can now attach to an existing elevated same-user server, and elevated clients can attach to a normally started server, without an `Access is denied` named-pipe failure.
 - Configs containing the retired Herdr-written `ui.agent_panel_scope` setting no longer report it as an unknown key after upgrades. (#2292)
 - Claude Code confirmation prompts using `Enter to confirm · Esc to cancel` now report `blocked` instead of `idle`. (#2268)
+- Kiro CLI prompts now have positive idle detection instead of remaining in an unknown state. (#2301, thanks @smileynet)
+- Cursor's Run Everything footer no longer produces a false blocked state. (#1763, #2220, thanks @Nagi-ovo)
+- Versioned Python agent wrappers such as `python3.13` are now detected. (#2188, thanks @plarson)
+- Pi state reporting now ignores RPC, JSON, and print-mode helper processes that are not interactive TUI sessions. (#2159, thanks @rhjoh)
+- Collapsed workspace and Agent rows keep their status and active indicators visible, including with ten or more workspaces. (#2216, #2239, #2382, thanks @ianks)
 - Sidebar agent lists keep scrolling when differently sized clients are attached to the same session. (#2255, thanks @aiworkflowpro)
+- The Session Navigator now searches renamed single-tab labels. (#2320)
+- New splits return focus to the pane they were opened from. (#2266, thanks @jondkinney)
+- Halfwidth Katakana voiced and semi-voiced marks now render in the correct cell. (#2257, thanks @kazunari-kamata)
+- Ctrl-clicking a URL no longer forwards its release after the browser takes host focus, preventing duplicate tabs. (#2290, #2291, thanks @kataokatsuki)
+- OSC 4 palette overrides now render with the requested color instead of forwarding the palette index. (#2162, thanks @hamidi-dev)
+- Host terminal appearance is re-queried when focus returns, keeping automatic light and dark themes current. (#2416, #2417)
+- The bundled and installable Herdr agent skill now matches this stable release's CLI and lifecycle behavior. (#2847)
 - `pane send-keys` and `agent send-keys` now preserve Shift when sending `shift+tab`, allowing agent permission modes to be cycled programmatically. (#1561, thanks @keinstn and @tomohisa)
 
 ## [0.8.0] - 2026-08-03

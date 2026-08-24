@@ -11,6 +11,10 @@ test:
 test-one filter:
     cargo nextest run --locked "{{filter}}" --status-level fail --final-status-level fail --failure-output final --success-output never
 
+# Enforce deterministic UI hot-path architecture boundaries
+ui-hot-path-architecture-test:
+    python3 -m unittest scripts.test_ui_hot_path_architecture
+
 # Run fast local lint checks
 [unix]
 lint:
@@ -55,8 +59,23 @@ install-hooks:
     @echo "installed git hooks from .githooks"
 
 # Build release binary
+[unix]
 build:
     cargo build --release --locked
+
+[script("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File")]
+[windows]
+build:
+    cargo build --release --locked
+
+# Non-gating full-render scaling profile for background workspaces and active panes
+bench-render-scale:
+    cargo test --release --locked --bin herdr render_scale_profile -- --ignored --nocapture --test-threads=1
+
+# ~3-5 minute CPU comparison; downloads stable unless HERDR_PERF_BASELINE_BIN is set
+bench-release-smoke:
+    cargo build --release --locked
+    scripts/release_perf_smoke.sh "${CARGO_TARGET_DIR:-target}/release/herdr"
 
 # Build the website and documentation
 website-build:
@@ -66,6 +85,7 @@ website-build:
 integration-assets-test:
     bun test src/integration/assets/herdr-agent-state.test.ts
     bun test src/integration/assets/opencode/herdr-agent-state.test.ts
+    bun test src/integration/assets/opencode/herdr-tui-session.test.ts
 
 # Run plugin marketplace Worker tests
 plugin-marketplace-test:
@@ -114,14 +134,25 @@ release-docs-check:
     just website-build
     cd website && bun run build:draft
 
+# Validate release docs, render scaling, and end-to-end CPU before release preparation
+pre-release-check:
+    just release-docs-check
+    just bench-render-scale
+    just bench-release-smoke
+    @echo "release review required: investigate material render-scaling regressions before publishing."
+    @echo "release review required: update skills/herdr/SKILL.md for this stable release so it matches the current CLI, IDs, agent lifecycle semantics, and safety guidance."
+    @echo "release policy: do not update skills/herdr/SKILL.md between stable releases; preview builds keep the latest stable skill."
+
 # Prepare the release commit without tagging or pushing (usage: just release-prepare 0.1.1)
 release-prepare version:
     @printf '%s\n' '{{version}}' | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { \
         echo "error: version must look like 0.6.6 without a v prefix"; \
         exit 1; \
     }
-    @if [ -n "$(git status --porcelain)" ]; then \
-        echo "error: commit your changes first"; \
+    @if ! git diff --quiet -- . ':(exclude)skills/herdr/SKILL.md' || \
+        ! git diff --cached --quiet -- . ':(exclude)skills/herdr/SKILL.md' || \
+        [ -n "$(git ls-files --others --exclude-standard)" ]; then \
+        echo "error: commit all changes except skills/herdr/SKILL.md first"; \
         exit 1; \
     fi
     @git fetch origin master --tags
@@ -129,13 +160,13 @@ release-prepare version:
         echo "error: tag v{{version}} already exists"; \
         exit 1; \
     fi
-    just release-docs-check
+    just pre-release-check
     python3 scripts/changelog.py prepare --version {{version}}
     cp CHANGELOG.md docs/next/CHANGELOG.md
     sed -i.bak 's/^version = ".*"/version = "{{version}}"/' Cargo.toml && rm -f Cargo.toml.bak
     cargo update -p herdr --offline
     just check
-    git add CHANGELOG.md docs/next/CHANGELOG.md Cargo.toml Cargo.lock
+    git add CHANGELOG.md docs/next/CHANGELOG.md Cargo.toml Cargo.lock skills/herdr/SKILL.md
     git diff --cached --quiet || git commit -m "release: v{{version}}"
     @echo "v{{version}} release commit prepared. Review it, then run: just release-publish {{version}}"
 

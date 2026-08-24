@@ -50,6 +50,18 @@ herdr server reload-config
 
 重载会在不重启窗格的情况下应用大多数 UI 设置。仅启动时生效的设置仍需重启。
 
+## 无客户端终端尺寸
+
+没有客户端连接时，服务器会使用 120×40 的虚拟终端进行布局并创建新窗格。可通过以下配置更改用于无客户端编排的回退尺寸：
+
+```toml
+[server]
+headless_cols = 160
+headless_rows = 50
+```
+
+客户端连接后，其尺寸仍决定共享运行时的大小。客户端断开后，现有窗格 PTY 会保留上次连接时的尺寸，而新的无客户端布局会使用配置的回退值。
+
 ## 终端默认值
 
 设置 Herdr 创建新交互式窗格时使用的可执行文件：
@@ -137,7 +149,15 @@ split_horizontal = "prefix+minus"
 next_tab = ["prefix+n", "ctrl+alt+]"]
 ```
 
-可选动作默认不设置。使用 `prefix+` 可获得前缀模式行为；当你确实需要直接快捷键时，请使用显式的修饰组合键。
+可选动作默认不设置。使用 `prefix+` 可获得前缀模式行为；当你确实需要直接快捷键时，请使用显式的修饰组合键。例如，可以像 tmux 一样通过一次按键调整窗格大小，而无需进入调整大小模式：
+
+```toml
+[keys]
+resize_pane_left = "ctrl+shift+alt+left"
+resize_pane_down = "ctrl+shift+alt+down"
+resize_pane_up = "ctrl+shift+alt+up"
+resize_pane_right = "ctrl+shift+alt+right"
+```
 
 按键字符串支持普通按键、`ctrl+a`、`shift+n`、`alt+1`、`cmd+k` 等修饰组合键，以及 `enter`、`tab`、`esc`、`left`、`right`、`up`、`down` 等特殊键。也支持 `minus`、`comma`、`ampersand`、`plus`、`backtick` 等命名标点。直接绑定 `n` 这样的普通可打印键并不安全，因为它会拦截输入；除非你有意设置直接绑定，否则请使用 `prefix+n`。`navigate_workspace_*` 和 `navigate_pane_*` 字段仅在导航模式中生效，可以使用 `j` 或 `k` 等普通按键；它们不得使用 `prefix+`、`esc`、`enter`、`tab`、`shift+tab`、`left`、`right`，也不得使用无修饰键的 `1` 到 `9`。左右方向键是向左和向右导航窗格的永久别名。这些导航模式快捷键独立于 `focus_pane_down = "prefix+j"` 等通用动作绑定；两者使用同一按键时，打开导航模式后，导航模式快捷键优先。Alt、Cmd/Super 以及带修饰键的标点取决于你的终端和 tmux 设置。
 
@@ -239,6 +259,8 @@ dark_name = "catppuccin"
 ```toml
 [theme.custom]
 sidebar_bg = "#181825"
+active_row_bg = "#1e1e2e"
+selection_bg = "#313244"
 panel_bg = "reset"
 accent = "#a6e3a1"
 green = "#a6e3a1"
@@ -247,9 +269,26 @@ red = "#f38ba8"
 yellow = "#f9e2af"
 ```
 
-`sidebar_bg` 可单独设置桌面侧边栏的背景色。省略时，侧边栏继续使用宿主终端背景。
+`sidebar_bg` 可单独设置桌面侧边栏的背景色。省略时，侧边栏继续使用宿主终端背景。`active_row_bg` 可更改当前 Space 和已聚焦 Agent 行的背景色，而不会影响分隔线或滚动条轨道。`selection_bg` 可更改侧边栏中 Navigate 模式光标行的背景色。
 
 颜色值支持十六进制、命名颜色、`rgb(r,g,b)`，以及 `reset`、`default`、`none`、`transparent` 等重置别名。
+
+启用 `auto_switch` 后，可以通过明暗模式子表在共享自定义颜色之上应用不同的覆盖值：
+
+```toml
+[theme.custom]
+accent = "#89b4fa"
+
+[theme.custom.light]
+panel_bg = "#eff1f5"
+text = "#4c4f69"
+
+[theme.custom.dark]
+panel_bg = "#1e1e2e"
+text = "#cdd6f4"
+```
+
+有效调色板按以下顺序应用：内置主题、`[theme.custom]`，然后是 `[theme.custom.light]` 或 `[theme.custom.dark]`。省略模式子表时，会保留现有的共享覆盖行为。
 
 ## UI 与侧边栏
 

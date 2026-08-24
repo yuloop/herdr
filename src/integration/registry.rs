@@ -22,6 +22,7 @@ pub(crate) fn integration_target_label(
         crate::api::schema::IntegrationTarget::Hermes => "hermes",
         crate::api::schema::IntegrationTarget::Qwen => "qwen",
         crate::api::schema::IntegrationTarget::Qodercli => "qodercli",
+        crate::api::schema::IntegrationTarget::Qwen => "qwen",
         crate::api::schema::IntegrationTarget::Cursor => "cursor",
         crate::api::schema::IntegrationTarget::Mastracode => "mastracode",
         crate::api::schema::IntegrationTarget::AntigravityCli => "antigravity-cli",
@@ -52,6 +53,7 @@ pub(crate) fn integration_target_command_names(
         crate::api::schema::IntegrationTarget::Hermes => &["hermes"],
         crate::api::schema::IntegrationTarget::Qwen => &["qwen"],
         crate::api::schema::IntegrationTarget::Qodercli => qodercli_command_names(),
+        crate::api::schema::IntegrationTarget::Qwen => &["qwen"],
         crate::api::schema::IntegrationTarget::Cursor => cursor_command_names(),
         crate::api::schema::IntegrationTarget::Mastracode => &["mastracode"],
         crate::api::schema::IntegrationTarget::AntigravityCli => &["agy"],
@@ -79,7 +81,13 @@ pub(crate) fn integration_target_supported(target: crate::api::schema::Integrati
                 | crate::api::schema::IntegrationTarget::Kimi
                 | crate::api::schema::IntegrationTarget::Qwen
                 | crate::api::schema::IntegrationTarget::Qodercli
+                | crate::api::schema::IntegrationTarget::Qwen
                 | crate::api::schema::IntegrationTarget::AntigravityCli
+                | crate::api::schema::IntegrationTarget::Devin
+                | crate::api::schema::IntegrationTarget::Hermes
+                | crate::api::schema::IntegrationTarget::Cursor
+                | crate::api::schema::IntegrationTarget::Mastracode
+                | crate::api::schema::IntegrationTarget::Grok
         )
     }
 
@@ -200,12 +208,9 @@ pub(crate) fn codex_executable_name() -> &'static str {
 pub(crate) fn hermes_install_layout_available() -> bool {
     #[cfg(windows)]
     {
-        let Some(local_app_data) =
-            std::env::var_os("LOCALAPPDATA").filter(|value| !value.is_empty())
-        else {
+        let Ok(dir) = hermes_dir() else {
             return false;
         };
-        let dir = PathBuf::from(local_app_data).join("hermes");
         [
             dir.join("hermes.exe"),
             dir.join("bin").join("hermes.exe"),
@@ -335,6 +340,11 @@ fn integration_specs() -> [(
             crate::api::schema::IntegrationTarget::Qodercli,
             qodercli_dir().map(|dir| dir.join("hooks").join(super::QODERCLI_HOOK_INSTALL_NAME)),
             super::QODERCLI_INTEGRATION_VERSION,
+        ),
+        (
+            crate::api::schema::IntegrationTarget::Qwen,
+            qwen_dir().map(|dir| dir.join("hooks").join(super::QWEN_HOOK_INSTALL_NAME)),
+            super::QWEN_INTEGRATION_VERSION,
         ),
         (
             crate::api::schema::IntegrationTarget::Cursor,

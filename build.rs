@@ -37,6 +37,8 @@ fn main() {
     println!("cargo:rerun-if-changed=vendor/libghostty-vt/include");
     println!("cargo:rerun-if-changed=vendor/libghostty-vt/pkg");
     println!("cargo:rerun-if-changed=vendor/libghostty-vt/src");
+    println!("cargo:rerun-if-changed=locales/en.yml"
+    println!("cargo:rerun-if-changed=locales/zh.yml");
     println!("cargo:rerun-if-changed=vendor/libghostty-vt/VERSION");
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_OPTIMIZE");
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SIMD");

@@ -18,8 +18,8 @@
 
 ---
 
-> 这是 [herdrdev/herdr](https://github.com/herdrdev/herdr) 的简体中文汉化社区 Fork，非官方项目。  
-> Copyright © 2025 herdrdev · 基于 [Apache License 2.0](LICENSE) 分发。  
+> 这是 [herdrdev/herdr](https://github.com/herdrdev/herdr) 的简体中文汉化社区 Fork，非官方项目。
+> Copyright © 2025 herdrdev · 基于 [Apache License 2.0](LICENSE) 分发。
 > 汉化工作由 yuloop 社区维护，与 herdrdev 官方团队无隶属关系。
 
 https://github.com/user-attachments/assets/043ec09f-4bdd-41d5-aee0-8fda6b83e267
@@ -47,7 +47,7 @@ https://github.com/user-attachments/assets/043ec09f-4bdd-41d5-aee0-8fda6b83e267
 | 中文文档 | 无 | 全量文档中文化（6 版本×18 篇） |
 | 汉化文件 | 无 | locales/zh.yml + zh-CN.md + docs/zh-cn/* |
 
-> herdr 汉化版基于上游 clean master rebuild，仅 8 个源文件 + 5 个文档/工作流与上游不同。  
+> herdr 汉化版基于上游 clean master rebuild，仅 8 个源文件 + 5 个文档/工作流与上游不同。
 > 具体本地修改文件：
 > - `locales/zh.yml`（458 行中文翻译）
 > - `src/i18n.rs` + `build.rs`（国际化集成）
@@ -98,5 +98,5 @@ just check       # 格式化、测试和维护检查
 
 ## 许可证
 
-Herdr 源代码基于 [Apache License 2.0](LICENSE) 分发。  
+Herdr 源代码基于 [Apache License 2.0](LICENSE) 分发。
 汉化版本继承相同许可证，Copyright © 2025 herdrdev，汉化维护 © 2025 yuloop。

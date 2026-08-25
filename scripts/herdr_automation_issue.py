@@ -338,6 +338,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_url=args.run_url,
             )
     except (IssueError, OSError) as err:
+        err_msg = str(err)
+        if "(410)" in err_msg or "Issues has been disabled" in err_msg:
+            print("automation issue: issues are disabled in this repository; skipping", file=sys.stderr)
+            return 0
         print(f"automation issue error: {err}", file=sys.stderr)
         return 1
     return 0

@@ -1,0 +1,157 @@
+name: Herdr Chinese Nightly
+on:
+  schedule:
+    - cron: "47 2,8,14,20 * * *"   # 每天 4 次，跟随上游 master 最新提交
+  workflow_dispatch:
+permissions:
+  contents: write
+env:
+  RUST_TOOLCHAIN_VERSION: 1.96.1
+  LIBGHOSTTY_VT_OPTIMIZE: ReleaseFast
+  LIBGHOSTTY_VT_SIMD: "true"
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.res.outputs.should_build }}
+      tag: ${{ steps.res.outputs.tag }}
+      ver: ${{ steps.res.outputs.ver }}
+      sha12: ${{ steps.res.outputs.sha12 }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Resolve upstream HEAD
+        id: res
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/herdrdev/herdr.git" || true
+          git fetch upstream master
+          UP_SHA=$(git rev-parse upstream/master)
+          SHA12="${UP_SHA:0:12}"
+          VER=$(git show upstream/master:Cargo.toml | grep '^version' | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          CN_TAG="v${VER}-cn-nightly-${SHA12}"
+          echo "upstream: ${UP_SHA} / version ${VER}"
+          # tag 含 sha 天然防重：已存在 = 已构建过
+          if git rev-parse -q --verify "refs/tags/${CN_TAG}" >/dev/null 2>&1; then
+            echo "nightly ${CN_TAG} 已存在，跳过"
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "should_build=true" >> "$GITHUB_OUTPUT"
+          echo "tag=${CN_TAG}" >> "$GITHUB_OUTPUT"
+          echo "ver=${VER}" >> "$GITHUB_OUTPUT"
+          echo "sha12=${SHA12}" >> "$GITHUB_OUTPUT"
+  build:
+    needs: resolve
+    if: needs.resolve.outputs.should_build == 'true'
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: herdr-cn-nightly-${{ needs.resolve.outputs.ver }}-linux-x64
+            ext: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            name: herdr-cn-nightly-${{ needs.resolve.outputs.ver }}-windows-x64
+            ext: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # 构建基于汉化 main（已含汉化补丁）；上游最新源码已在 main merge 上游时带入
+          fetch-depth: 0
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          targets: ${{ matrix.target }}
+      - name: Install Zig
+        # build.rs 的 vendored libghostty-vt 在 Linux/Windows 都需要 zig（上游同款逻辑）
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+      - name: Install Windows build tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
+            choco install cmake ninja -y --no-progress
+          }
+      - name: Build release binary
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: target
+        run: |
+          cargo build --release --locked --bin herdr --target ${{ matrix.target }}
+          ls -la target/${{ matrix.target }}/release/herdr* | head -5
+      - name: Package Linux tarball
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/herdr dist/herdr
+          tar -czf dist/${{ matrix.name }}.tar.gz -C dist herdr
+      - name: Package Windows zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "target\${{ matrix.target }}\release\herdr.exe" dist\herdr.exe
+          Compress-Archive -Path dist\herdr.exe -DestinationPath "dist\${{ matrix.name }}.zip" -Force
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*.${{ matrix.ext }}
+          if-no-files-found: error
+  publish:
+    needs: [resolve, build]
+    if: needs.resolve.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+      - name: Compute SHA256SUMS
+        run: |
+          cd dist
+          sha256sum herdr-cn-nightly-*.tar.gz herdr-cn-nightly-*.zip > SHA256SUMS
+          ls -la
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          name: herdr 汉化预览 ${{ needs.resolve.outputs.tag }}
+          body: |
+            herdr 汉化实时预览版（上游 master ${{ needs.resolve.outputs.sha12 }}）
+
+            - Linux x64 / Windows x64 双平台
+          files: dist/*.tar.gz,dist/*.zip,dist/SHA256SUMS
+          fail_on_unmatched_files: true
+      - name: Delete outdated preview releases
+        env:
+          GH_TOKEN: ${{ secrets.YU_TOKEN }}
+        run: |
+          # 页面只保留最新 1 个预览条目：删掉其他 tag 含 -cn-nightly 的 release
+          LATEST_TAG="${{ needs.resolve.outputs.tag }}"
+          gh api "repos/yuloop/herdr/releases?per_page=50" --jq '.[] | select(.prerelease==true or (.tag_name | contains("-cn-nightly"))) | .tag_name' \
+            | while read -r t; do
+                if [ "$t" != "$LATEST_TAG" ]; then
+                  echo "删除旧预览 $t"
+                  gh api -X DELETE "repos/yuloop/herdr/releases/tags/$t" || true
+                fi
+              done

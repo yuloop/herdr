@@ -23,6 +23,7 @@
 - Claude Code panes now remain working while MCP tasks continue in the background after a turn ends. (#3090)
 - Tab bar status commands now remove ESC-prefixed terminal control sequences instead of displaying their sequence bodies as text. (#3001)
 - Unix plugin pane commands now default `PWD` to their resolved working directory, so direct popup tools open at explicit `--cwd` paths while preserving caller-provided `PWD` values. (#2984)
+- Plugin link handlers now receive matching OSC 8 `file://` clicks while unmatched file links remain excluded from the system URL opener. (#2941)
 
 ## [0.8.2] - 2026-08-19
 

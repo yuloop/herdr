@@ -148,10 +148,10 @@ jobs:
         run: |
           # 页面只保留最新 1 个预览条目：删掉其他 tag 含 -cn-nightly 的 release
           LATEST_TAG="${{ needs.resolve.outputs.tag }}"
-          gh api "repos/yuloop/herdr/releases?per_page=50" --jq '.[] | select(.prerelease==true or (.tag_name | contains("-cn-nightly"))) | .tag_name' \
+          gh api "repos/yuloop/herdr/releases?per_page=50" --jq -r '.[] | select(.prerelease==true or (.tag_name | contains("-cn-nightly"))) | .tag_name' \
             | while read -r t; do
                 if [ "$t" != "$LATEST_TAG" ]; then
                   echo "删除旧预览 $t"
-                  gh api -X DELETE "repos/yuloop/herdr/releases/tags/$t" || true
+                  gh api -X DELETE "repos/yuloop/herdr/releases/tags/$t" || echo "!!! delete failed: $t"
                 fi
               done

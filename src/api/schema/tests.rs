@@ -720,10 +720,12 @@ fn worktree_request_and_response_round_trip() {
             branch: Some("worktree/api".into()),
             base: Some("HEAD".into()),
             focus: true,
+            trust_repository: true,
             ..WorktreeCreateParams::default()
         }),
     };
     let json = serde_json::to_string(&request).unwrap();
+    assert!(json.contains("\"trust_repository\":true"));
     let restored: Request = serde_json::from_str(&json).unwrap();
     assert_eq!(restored, request);
 

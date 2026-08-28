@@ -890,18 +890,62 @@ fn codex_screen_blocker_outranks_working_fallback() {
 }
 
 #[test]
-fn codex_weak_blocker_outranks_working_fallback() {
-    let screen = "• Working (4s • esc to interrupt)\n\
-        do you want to continue? [y/n]\n\
-        › Use /skills to list available skills\n";
-    let result = osc_explain(Agent::Codex, screen, "project", "");
+fn codex_weak_blocker_without_current_prompt_is_blocked() {
+    let result = osc_explain(
+        Agent::Codex,
+        "do you want to continue? [y/n]\n",
+        "project",
+        "",
+    );
 
     assert_eq!(result.state, AgentState::Blocked);
     assert_eq!(
         result.matched_rule.as_ref().map(|r| r.id.as_str()),
         Some("weak_blocker")
     );
-    assert!(!result.visible_working);
+}
+
+#[test]
+fn codex_current_prompt_keeps_weak_text_from_overriding_working_fallback() {
+    let screen = "• Working (4s • esc to interrupt)\n\
+        do you want to continue? [y/n]\n\
+        › Use /skills to list available skills\n";
+    let result = osc_explain(Agent::Codex, screen, "project", "");
+
+    assert_eq!(result.state, AgentState::Working);
+    assert_eq!(
+        result.matched_rule.as_ref().map(|r| r.id.as_str()),
+        Some("screen_working_fallback")
+    );
+    assert!(result.visible_working);
+}
+
+#[test]
+fn codex_weak_blocker_ignores_finished_response_above_current_prompt() {
+    let screen = "• The `wt rm` transcript now shows [y/N] / esc, matching the real prompt.\n\n\
+        ─ Worked for 4m 59s ─\n\n\
+        › Ask Codex to do anything\n";
+    let result = osc_explain(Agent::Codex, screen, "project", "");
+
+    assert_eq!(result.state, AgentState::Idle);
+    assert_eq!(
+        result.matched_rule.as_ref().map(|r| r.id.as_str()),
+        Some("osc_title_idle")
+    );
+}
+
+#[test]
+fn codex_weak_blocker_ignores_wrapped_current_prompt_text() {
+    let screen = "› Explain why this prompt wraps before quoting the confirmation text\n\
+          [y/N] / esc and whether the docs should include it\n\n\
+          gpt-5.6-sol default · /work\n";
+    let result = osc_explain(Agent::Codex, screen, "project", "");
+
+    assert_eq!(result.state, AgentState::Idle);
+    assert_eq!(
+        result.matched_rule.as_ref().map(|r| r.id.as_str()),
+        Some("osc_title_idle")
+    );
 }
 
 #[test]

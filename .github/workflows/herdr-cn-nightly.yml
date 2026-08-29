@@ -141,10 +141,11 @@ jobs:
 
             - Linux x64 / Windows x64 双平台
           files: dist/*.tar.gz,dist/*.zip,dist/SHA256SUMS
+          make_latest: false
           fail_on_unmatched_files: true
       - name: Delete outdated preview releases
         env:
-          GH_TOKEN: ${{ secrets.YU_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           # 页面只保留最新 1 个预览条目：删掉其他 tag 含 -cn-nightly 的 release
           LATEST_TAG="${{ needs.resolve.outputs.tag }}"

@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 
 #[cfg(not(windows))]
 use interprocess::local_socket::traits::Stream as _;
+use rust_i18n::t;
 use serde::{Deserialize, Deserializer};
 
 const STABLE_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/latest.json";
@@ -343,14 +344,14 @@ where
             url,
         ])
         .output()
-        .map_err(|e| format!("curl failed: {e}"))?;
+        .map_err(|e| t!("update.curl_failed", e = e).to_string())?;
 
     if !output.status.success() {
-        return Err("failed to fetch update manifest".into());
+        return Err(t!("update.fetch_manifest_failed").to_string());
     }
 
     serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("failed to parse update manifest JSON: {e}"))
+        .map_err(|e| t!("update.parse_manifest_failed", e = e).to_string())
 }
 
 fn handle_manifest_announcement(version: &str, value: Option<&serde_json::Value>) {
@@ -377,8 +378,10 @@ fn handle_manifest_announcement(version: &str, value: Option<&serde_json::Value>
 
 fn release_info_from_manifest(manifest: &UpdateManifest) -> Result<Option<ReleaseInfo>, String> {
     let current = Version::current();
-    let latest = Version::parse(&manifest.version)
-        .ok_or_else(|| format!("invalid version in update manifest: {}", manifest.version))?;
+    let latest = Version::parse(&manifest.version).ok_or_else(|| {
+        let version = &manifest.version;
+        t!("update.invalid_version", version = version).to_string()
+    })?;
 
     if !stable_channel_should_install(&latest, &current, crate::build_info::is_preview()) {
         return Ok(None); // up to date
@@ -580,7 +583,7 @@ fn check_homebrew_latest() -> Result<Option<Version>, String> {
             HOMEBREW_FORMULA_API_URL,
         ])
         .output()
-        .map_err(|e| format!("curl failed: {e}"))?;
+        .map_err(|e| t!("update.curl_failed", e = e).to_string())?;
 
     if !output.status.success() {
         return Err("failed to fetch Homebrew formula JSON".into());
@@ -611,19 +614,23 @@ impl Drop for DownloadedUpdate {
 /// Download a release to a prepared executable temp file without touching the running server.
 #[cfg(not(windows))]
 fn download_update(release: &ReleaseInfo) -> Result<DownloadedUpdate, String> {
-    let current_exe = env::current_exe().map_err(|e| format!("can't find current binary: {e}"))?;
+    let current_exe =
+        env::current_exe().map_err(|e| t!("update.cant_find_binary", e = e).to_string())?;
 
-    let parent = current_exe.parent().ok_or("can't find binary directory")?;
+    let parent = current_exe
+        .parent()
+        .ok_or(t!("update.cant_find_binary_dir").to_string())?;
 
     // Check write permissions early
     let test_path = parent.join(".herdr-write-test");
     if let Err(e) = fs::write(&test_path, b"") {
         let _ = fs::remove_file(&test_path);
-        return Err(format!(
-            "install directory not writable: {} ({}). Try running with appropriate permissions.",
-            parent.display(),
-            e
-        ));
+        return Err(t!(
+            "update.install_dir_not_writable",
+            dir = parent.display(),
+            err = e
+        )
+        .to_string());
     }
     let _ = fs::remove_file(&test_path);
 
@@ -636,11 +643,11 @@ fn download_update(release: &ReleaseInfo) -> Result<DownloadedUpdate, String> {
         .arg(&tmp_path)
         .arg(&release.download_url)
         .status()
-        .map_err(|e| format!("download failed: {e}"))?;
+        .map_err(|e| t!("update.download_failed_e", e = e).to_string())?;
 
     if !status.success() {
         let _ = fs::remove_file(&tmp_path);
-        return Err("download failed".into());
+        return Err(t!("update.download_failed").to_string());
     }
 
     if let Some(expected) = &release.sha256 {
@@ -659,7 +666,7 @@ fn download_update(release: &ReleaseInfo) -> Result<DownloadedUpdate, String> {
         use std::os::unix::fs::PermissionsExt;
         if let Err(e) = fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o755)) {
             let _ = fs::remove_file(&tmp_path);
-            return Err(format!("chmod failed: {e}"));
+            return Err(t!("update.chmod_failed", e = e).to_string());
         }
     }
 
@@ -681,7 +688,7 @@ fn install_downloaded_update(mut update: DownloadedUpdate) -> Result<(), String>
     // Next launch picks up the new file.
     if let Err(e) = fs::rename(&tmp_path, &update.current_exe) {
         let _ = fs::remove_file(&tmp_path);
-        return Err(format!("failed to replace binary: {e}"));
+        return Err(t!("update.replace_binary_failed", e = e).to_string());
     }
 
     Ok(())
@@ -1101,7 +1108,7 @@ pub(crate) fn parse_self_update_args(args: &[String]) -> Result<SelfUpdateOption
             "--help" | "-h" => {
                 return Err("usage: herdr update [--handoff]".to_string());
             }
-            _ => return Err(format!("unknown update option: {arg}")),
+            _ => return Err(t!("update.unknown_option", arg = arg.as_str()).to_string()),
         }
     }
     Ok(options)
@@ -1131,19 +1138,19 @@ fn prompt_to_stop_old_servers_before_update(
         );
     }
     eprintln!();
-    eprintln!("If you choose no, these sessions keep using the old server until you stop them.");
-    eprintln!("Stop the old server after installing? Stopping exits pane processes.");
+    eprintln!("{}", t!("update.keep_old_server"));
+    eprintln!("{}", t!("update.stop_old_server_question"));
 
     loop {
-        eprint!("stop after installing? [y/N] ");
+        eprint!("{}", t!("update.stop_after_install_prompt"));
         io::stderr()
             .flush()
-            .map_err(|e| format!("failed to flush prompt: {e}"))?;
+            .map_err(|e| t!("update.flush_prompt_failed", e = e).to_string())?;
 
         let mut input = String::new();
         let read = io::stdin()
             .read_line(&mut input)
-            .map_err(|e| format!("failed to read prompt response: {e}"))?;
+            .map_err(|e| t!("update.read_response_failed", e = e).to_string())?;
         if read == 0 {
             return Ok(false);
         }
@@ -1151,7 +1158,7 @@ fn prompt_to_stop_old_servers_before_update(
         match input.trim().to_ascii_lowercase().as_str() {
             "y" | "yes" => return Ok(true),
             "" | "n" | "no" => return Ok(false),
-            _ => eprintln!("please answer y or n"),
+            _ => eprintln!("{}", t!("update.please_y_n")),
         }
     }
 }
@@ -1242,11 +1249,14 @@ fn prompt_to_complete_plain_update(
     let (singular, plural) = target_group_nouns(&plans);
     let noun = if plans.len() == 1 { singular } else { plural };
     eprintln!(
-        "To complete the update, Herdr must stop {} running {}.",
-        plans.len(),
-        noun
+        "{}",
+        t!(
+            "update.must_stop_to_complete",
+            count = plans.len(),
+            noun = noun
+        )
     );
-    eprintln!("This stops active pane processes, including shells, dev servers, and tests.");
+    eprintln!("{}", t!("update.stops_processes_warning"));
     for plan in plans {
         eprintln!(
             "  {} {}: server v{}",
@@ -1258,18 +1268,21 @@ fn prompt_to_complete_plain_update(
 
     loop {
         eprint!(
-            "Stop running {} and install {} now? [y/N] ",
-            noun,
-            release.label()
+            "{}",
+            t!(
+                "update.stop_and_install_prompt",
+                noun = noun,
+                label = release.label()
+            )
         );
         io::stderr()
             .flush()
-            .map_err(|e| format!("failed to flush prompt: {e}"))?;
+            .map_err(|e| t!("update.flush_prompt_failed", e = e).to_string())?;
 
         let mut input = String::new();
         let read = io::stdin()
             .read_line(&mut input)
-            .map_err(|e| format!("failed to read prompt response: {e}"))?;
+            .map_err(|e| t!("update.read_response_failed", e = e).to_string())?;
         if read == 0 {
             return Ok(false);
         }
@@ -1277,7 +1290,7 @@ fn prompt_to_complete_plain_update(
         if let Some(answer) = parse_stop_old_servers_after_update_response(&input, false) {
             return Ok(answer);
         }
-        eprintln!("please answer y or n");
+        eprintln!("{}", t!("update.please_y_n"));
     }
 }
 
@@ -1300,13 +1313,13 @@ fn print_running_session_update_summary(
     release: &ReleaseInfo,
     options: SelfUpdateOptions,
 ) {
-    eprintln!("running herdr targets:");
+    eprintln!("{}", t!("update.running_targets"));
     for plan in plans {
         if options.live_handoff {
             let capability = if server_supports_live_handoff(&plan.server) {
-                "handoff supported"
+                t!("update.handoff_supported").to_string()
             } else {
-                "too old for handoff"
+                t!("update.too_old_handoff").to_string()
             };
             eprintln!(
                 "  {}: server v{} ({})",
@@ -1340,9 +1353,12 @@ fn live_handoff_running_server_for_update(
     live_handoff_server_via_api_for_update_at(plan.socket_path(), updated_exe, release)?;
     wait_for_server_handoff_at(plan.socket_path(), SERVER_HANDOFF_CONFIRM_TIMEOUT, release)?;
     eprintln!(
-        "live handoff complete for {} {}; pane processes should still be running.",
-        plan.target_noun(),
-        plan.label()
+        "{}",
+        t!(
+            "update.handoff_complete",
+            noun = plan.target_noun(),
+            label = plan.label()
+        )
     );
     Ok(())
 }
@@ -1378,9 +1394,12 @@ fn prompt_to_stop_old_server_after_failed_handoff(
     status: &crate::api::RuntimeStatus,
 ) -> Result<bool, String> {
     eprintln!(
-        "live handoff failed, but {} {} is still running with your panes.",
-        plan.target_noun(),
-        plan.label()
+        "{}",
+        t!(
+            "update.handoff_failed_running",
+            noun = plan.target_noun(),
+            label = plan.label()
+        )
     );
     eprintln!("  server: v{}", version_label(status.version.as_deref()));
     eprintln!("  installed: {}", release.label());
@@ -1402,12 +1421,12 @@ fn prompt_to_stop_old_server_after_failed_handoff(
         eprint!("stop the old server now? [y/N] ");
         io::stderr()
             .flush()
-            .map_err(|e| format!("failed to flush prompt: {e}"))?;
+            .map_err(|e| t!("update.flush_prompt_failed", e = e).to_string())?;
 
         let mut input = String::new();
         let read = io::stdin()
             .read_line(&mut input)
-            .map_err(|e| format!("failed to read prompt response: {e}"))?;
+            .map_err(|e| t!("update.read_response_failed", e = e).to_string())?;
         if read == 0 {
             return Ok(false);
         }
@@ -1415,7 +1434,7 @@ fn prompt_to_stop_old_server_after_failed_handoff(
         match input.trim().to_ascii_lowercase().as_str() {
             "y" | "yes" => return Ok(true),
             "" | "n" | "no" => return Ok(false),
-            _ => eprintln!("please answer y or n"),
+            _ => eprintln!("{}", t!("update.please_y_n")),
         }
     }
 }
@@ -1521,7 +1540,7 @@ fn send_server_update_method_at(
     };
 
     let mut stream = crate::ipc::connect_local_stream(socket_path)
-        .map_err(|e| format!("failed to connect to running server: {e}"))?;
+        .map_err(|e| t!("update.connect_server_failed", e = e).to_string())?;
     stream
         .set_send_timeout(Some(timeout))
         .map_err(|e| format!("failed to set {error_prefix} write timeout: {e}"))?;
@@ -1550,8 +1569,8 @@ fn send_server_update_method_at(
     if read == 0 || line.trim().is_empty() {
         return Err(format!("empty {error_prefix} response"));
     }
-    let response: serde_json::Value =
-        serde_json::from_str(&line).map_err(|e| format!("invalid server response: {e}"))?;
+    let response: serde_json::Value = serde_json::from_str(&line)
+        .map_err(|e| t!("update.invalid_server_response", e = e).to_string())?;
     if let Some(error) = response.get("error") {
         return Err(format!("{error_prefix} failed: {error}"));
     }
@@ -1657,7 +1676,14 @@ fn wait_for_server_shutdown_at(socket_path: &Path, timeout: Duration) -> Result<
 
 #[cfg(not(windows))]
 fn stop_running_server_for_update(plan: &RunningServerUpdatePlan) -> Result<(), String> {
-    eprintln!("stopping herdr {} {}...", plan.target_noun(), plan.label());
+    eprintln!(
+        "{}",
+        t!(
+            "update.stopping",
+            noun = plan.target_noun(),
+            label = plan.label()
+        )
+    );
     stop_server_via_api_at(plan.socket_path(), SERVER_STOP_RESPONSE_TIMEOUT)?;
     wait_for_server_shutdown_at(plan.socket_path(), SERVER_HANDOFF_CONFIRM_TIMEOUT)?;
     Ok(())
@@ -1754,7 +1780,7 @@ fn print_running_session_update_outcomes(
     release: &ReleaseInfo,
 ) {
     if outcomes.is_empty() {
-        eprintln!("run herdr again.");
+        eprintln!("{}", t!("update.run_again"));
         return;
     }
 
@@ -2069,6 +2095,16 @@ fn homebrew_cellar_keg_root(path: &Path) -> Option<PathBuf> {
 
 /// Manual self-update command (`herdr update`).
 pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
+    if !crate::build_info::official_updates_enabled() {
+        if let Err(err) = crate::release_notes::clear_pending() {
+            tracing::warn!("failed to discard stale official release notes: {err}");
+        }
+        return Err(format!(
+            "self-update is disabled for {} builds; install updates through the distribution deployment workflow",
+            crate::build_info::channel()
+        ));
+    }
+
     let channel = UpdateChannel::configured();
 
     if is_homebrew_managed_install() {
@@ -2108,14 +2144,16 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
         return Err("run `herdr update` outside herdr after detaching from the session".into());
     }
 
-    eprintln!("checking {} channel for updates...", channel.as_str());
+    let channel_name = channel.as_str();
+    eprintln!("{}", t!("update.checking_channel", channel = channel_name));
 
     let current = Version::current();
 
     let release = match check_latest()? {
         Some(r) => r,
         None => {
-            eprintln!("already up to date ({})", crate::build_info::version());
+            let version = crate::build_info::version();
+            eprintln!("{}", t!("update.already_up_to_date", version = version));
             return Ok(current);
         }
     };
@@ -2131,10 +2169,8 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
     {
         let _ = options;
 
-        eprintln!(
-            "installing {} with the Windows installer...",
-            release.label()
-        );
+        let release_label = release.label();
+        eprintln!("{}", t!("update.installing_windows", label = release_label));
         if let Some(sha256) = &release.sha256 {
             tracing::debug!(sha256 = %sha256, "selected Windows update asset has checksum");
         }
@@ -2143,12 +2179,9 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
         eprintln!("downloaded {}", release.label());
         install_windows_update_with_installer(&release, &downloaded_update)?;
         let updated_exe = windows_installed_herdr_exe_path()?;
-        eprintln!("installed {}", release.label());
+        eprintln!("{}", t!("update.installed", label = release_label));
         print_outdated_integration_notice_with_updated_binary(&updated_exe);
-        eprintln!(
-            "Restart any running Herdr sessions to use {}.",
-            release.label()
-        );
+        eprintln!("{}", t!("update.restart_to_use", label = release_label));
     }
 
     #[cfg(not(windows))]
@@ -2157,19 +2190,20 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
         let server_update_decisions =
             confirm_running_server_update_action(running_server_plans, &release, options)?;
 
-        eprintln!("downloading {}...", release.label());
+        let release_label = release.label();
+        eprintln!("{}", t!("update.downloading", label = release_label));
         let downloaded_update = download_update(&release)?;
         let updated_exe = downloaded_update.current_exe.clone();
-        eprintln!("downloaded {}", release.label());
+        eprintln!("{}", t!("update.downloaded", label = release_label));
         if !options.live_handoff
             && !prompt_to_complete_plain_update(&server_update_decisions, &release)?
         {
-            eprintln!("Herdr was not updated.");
+            eprintln!("{}", t!("update.not_updated"));
             eprintln!("Stop running Herdr sessions when ready, then run `herdr update` again.");
             return Ok(current);
         }
         install_downloaded_update(downloaded_update)?;
-        eprintln!("installed {}", release.label());
+        eprintln!("{}", t!("update.installed", label = release_label));
         let server_update_decisions = if options.live_handoff {
             server_update_decisions
         } else {
@@ -2201,8 +2235,8 @@ fn print_outdated_integration_notice_with_updated_binary(updated_exe: &Path) {
 /// Background update check: only surface availability and release notes.
 /// Runs in a background thread at startup.
 pub fn auto_update(events: tokio::sync::mpsc::Sender<crate::events::AppEvent>) {
-    crate::logging::update_check_started();
     if let Ok(version) = env::var(FAKE_UPDATE_VERSION_ENV) {
+        crate::logging::update_check_started();
         let version = version.trim();
         if !version.is_empty() {
             tracing::info!(
@@ -2222,6 +2256,19 @@ pub fn auto_update(events: tokio::sync::mpsc::Sender<crate::events::AppEvent>) {
         }
         return;
     }
+
+    if !crate::build_info::official_updates_enabled() {
+        if let Err(err) = crate::release_notes::clear_pending() {
+            tracing::warn!("failed to discard stale official release notes: {err}");
+        }
+        tracing::info!(
+            build_channel = crate::build_info::channel(),
+            "skipping official update check for externally managed build"
+        );
+        return;
+    }
+
+    crate::logging::update_check_started();
 
     let configured_channel = UpdateChannel::configured();
     if is_homebrew_managed_install() {

@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use ratatui::layout::Direction;
 use tokio::sync::{mpsc, Notify};
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use crate::detect::AgentState;
 use crate::events::AppEvent;
@@ -43,6 +43,15 @@ struct RestoreRuntimeContext<'a> {
     render_dirty: Arc<RenderSignal>,
 }
 
+struct RestoreTabIdentityContext<'a> {
+    number: usize,
+    workspace_id: &'a str,
+    workspace_idx: usize,
+    tab_idx: usize,
+    origin_migrations: &'a LegacyOriginMigrations,
+    public_pane_ids_by_old_raw: &'a HashMap<u32, String>,
+}
+
 type RestoredSession = (
     Vec<Workspace>,
     HashMap<TerminalId, TerminalState>,
@@ -60,6 +69,290 @@ type RestoredTab = (
     HashMap<PaneId, u32>,
 );
 type RestoreFailures<T> = (T, usize);
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct RestoredPaneWorkspaceOrigin {
+    workspace_id: Option<String>,
+    label: Option<String>,
+}
+
+impl RestoredPaneWorkspaceOrigin {
+    fn apply_to(&self, pane: &mut PaneState) {
+        pane.origin_workspace_id = self.workspace_id.clone();
+        pane.origin_workspace_label = self.label.clone();
+    }
+}
+
+#[derive(Clone, Debug)]
+struct SnapshotCwdIdentity {
+    stable_key: String,
+    path_key: String,
+    label: String,
+}
+
+#[derive(Clone, Debug)]
+struct SnapshotWorkspaceIdentity {
+    workspace_id: String,
+    display_label: String,
+    cwd: SnapshotCwdIdentity,
+}
+
+#[derive(Clone, Debug)]
+struct LegacyOriginCandidate {
+    workspace_idx: usize,
+    tab_idx: usize,
+    pane_raw: u32,
+    legacy_label: String,
+    cwd: SnapshotCwdIdentity,
+    matched_workspace_idx: Option<usize>,
+}
+
+#[derive(Default)]
+struct LegacyOriginGroup {
+    cwd_keys: HashSet<String>,
+    has_host_evidence: bool,
+}
+
+type LegacyOriginMigrations = HashMap<(usize, usize, u32), RestoredPaneWorkspaceOrigin>;
+
+fn lexical_normalize_snapshot_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(
+                    normalized.components().next_back(),
+                    Some(Component::Normal(_))
+                ) {
+                    normalized.pop();
+                } else if !path.is_absolute() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn snapshot_path_key(path: &Path) -> String {
+    let normalized =
+        std::fs::canonicalize(path).unwrap_or_else(|_| lexical_normalize_snapshot_path(path));
+    let rendered = normalized.to_string_lossy().replace('\\', "/");
+    #[cfg(windows)]
+    let rendered = rendered.to_ascii_lowercase();
+    let kind = if path.is_absolute() {
+        "absolute"
+    } else {
+        "relative"
+    };
+    format!("{kind}:{rendered}")
+}
+
+fn snapshot_cwd_identity(cwd: &Path) -> SnapshotCwdIdentity {
+    let (space, label, _) = crate::workspace::discover_workspace_git_identity(cwd);
+    let path_key = snapshot_path_key(cwd);
+    let stable_key = space
+        .map(|space| {
+            format!(
+                "git-checkout:{}",
+                snapshot_path_key(Path::new(&space.checkout_key))
+            )
+        })
+        .unwrap_or_else(|| format!("path:{path_key}"));
+    SnapshotCwdIdentity {
+        stable_key,
+        path_key,
+        label,
+    }
+}
+
+fn snapshot_path_is_within(path_key: &str, root_key: &str) -> bool {
+    if path_key == root_key {
+        return true;
+    }
+    path_key
+        .strip_prefix(root_key.trim_end_matches('/'))
+        .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+fn matching_snapshot_workspace(
+    candidate: &SnapshotCwdIdentity,
+    workspaces: &[SnapshotWorkspaceIdentity],
+    host_idx: usize,
+) -> Option<usize> {
+    if workspaces.get(host_idx).is_some_and(|host| {
+        candidate.stable_key == host.cwd.stable_key
+            || snapshot_path_is_within(&candidate.path_key, &host.cwd.path_key)
+    }) {
+        return Some(host_idx);
+    }
+
+    let mut matches = workspaces
+        .iter()
+        .enumerate()
+        .filter(|(idx, workspace)| {
+            *idx != host_idx
+                && (candidate.stable_key == workspace.cwd.stable_key
+                    || snapshot_path_is_within(&candidate.path_key, &workspace.cwd.path_key))
+        })
+        .collect::<Vec<_>>();
+    matches.sort_by_key(|(_, workspace)| std::cmp::Reverse(workspace.cwd.path_key.len()));
+    let (matched_idx, matched) = matches.first().copied()?;
+    if matches
+        .get(1)
+        .is_some_and(|(_, next)| next.cwd.path_key.len() == matched.cwd.path_key.len())
+    {
+        None
+    } else {
+        Some(matched_idx)
+    }
+}
+
+fn untrusted_legacy_origin_label(pane: &super::snapshot::PaneSnapshot) -> Option<String> {
+    match pane.origin_workspace_id.as_deref() {
+        Some(id) => crate::pane::untrusted_legacy_origin_workspace_label(id).map(str::to_string),
+        None => pane.origin_workspace_label.clone(),
+    }
+}
+
+fn legacy_origin_migrations(
+    snapshot: &SessionSnapshot,
+    workspace_ids: &[String],
+) -> LegacyOriginMigrations {
+    let workspaces = snapshot
+        .workspaces
+        .iter()
+        .zip(workspace_ids)
+        .map(|(workspace, workspace_id)| {
+            let cwd = snapshot_cwd_identity(&workspace.identity_cwd);
+            SnapshotWorkspaceIdentity {
+                workspace_id: workspace_id.clone(),
+                display_label: workspace
+                    .custom_name
+                    .clone()
+                    .unwrap_or_else(|| cwd.label.clone()),
+                cwd,
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut candidates = Vec::new();
+    let mut groups = HashMap::<(usize, String), LegacyOriginGroup>::new();
+
+    for (workspace_idx, workspace) in snapshot.workspaces.iter().enumerate() {
+        for (tab_idx, tab) in workspace.tabs.iter().enumerate() {
+            for (&pane_raw, pane) in &tab.panes {
+                let Some(legacy_label) = untrusted_legacy_origin_label(pane) else {
+                    continue;
+                };
+                let cwd = snapshot_cwd_identity(&pane.cwd);
+                let matched_workspace_idx =
+                    matching_snapshot_workspace(&cwd, &workspaces, workspace_idx);
+                let host = &workspaces[workspace_idx];
+                let group = groups
+                    .entry((workspace_idx, legacy_label.clone()))
+                    .or_default();
+                group.cwd_keys.insert(cwd.stable_key.clone());
+                group.has_host_evidence |= matched_workspace_idx == Some(workspace_idx)
+                    || legacy_label == host.display_label;
+                candidates.push(LegacyOriginCandidate {
+                    workspace_idx,
+                    tab_idx,
+                    pane_raw,
+                    legacy_label,
+                    cwd,
+                    matched_workspace_idx,
+                });
+            }
+        }
+    }
+
+    let globally_corrupt_labels = candidates
+        .iter()
+        .filter_map(|candidate| {
+            let host = &workspaces[candidate.workspace_idx];
+            let group = groups
+                .get(&(candidate.workspace_idx, candidate.legacy_label.clone()))
+                .expect("legacy origin group should exist");
+            (candidate.legacy_label == host.display_label
+                || (group.cwd_keys.len() > 1 && group.has_host_evidence))
+                .then(|| candidate.legacy_label.clone())
+        })
+        .collect::<HashSet<_>>();
+
+    let mut migrations = HashMap::new();
+    for candidate in candidates {
+        let host = &workspaces[candidate.workspace_idx];
+        let group = groups
+            .get(&(candidate.workspace_idx, candidate.legacy_label.clone()))
+            .expect("legacy origin group should exist");
+        let label_matches_host = candidate.legacy_label == host.display_label;
+        let native_to_host = candidate.matched_workspace_idx == Some(candidate.workspace_idx);
+        let corrupted = label_matches_host
+            || (group.cwd_keys.len() > 1 && group.has_host_evidence)
+            || (native_to_host && globally_corrupt_labels.contains(&candidate.legacy_label));
+        let origin = if corrupted {
+            match candidate.matched_workspace_idx {
+                Some(matched_idx) if matched_idx == candidate.workspace_idx => {
+                    RestoredPaneWorkspaceOrigin::default()
+                }
+                Some(matched_idx) => {
+                    let matched = &workspaces[matched_idx];
+                    RestoredPaneWorkspaceOrigin {
+                        workspace_id: Some(matched.workspace_id.clone()),
+                        label: Some(matched.display_label.clone()),
+                    }
+                }
+                None => RestoredPaneWorkspaceOrigin {
+                    workspace_id: Some(crate::pane::legacy_origin_workspace_id(&format!(
+                        "cwd:{}",
+                        candidate.cwd.stable_key
+                    ))),
+                    label: Some(candidate.cwd.label.clone()),
+                },
+            }
+        } else {
+            RestoredPaneWorkspaceOrigin {
+                workspace_id: Some(crate::pane::legacy_origin_workspace_id(&format!(
+                    "label:{}:{}",
+                    host.workspace_id, candidate.legacy_label
+                ))),
+                label: Some(candidate.legacy_label.clone()),
+            }
+        };
+        info!(
+            host_workspace_id = %host.workspace_id,
+            pane_cwd_identity = %candidate.cwd.stable_key,
+            legacy_label = %candidate.legacy_label,
+            repaired_workspace_id = ?origin.workspace_id,
+            repaired_label = ?origin.label,
+            corrupted,
+            "migrated legacy pane workspace origin"
+        );
+        migrations.insert(
+            (
+                candidate.workspace_idx,
+                candidate.tab_idx,
+                candidate.pane_raw,
+            ),
+            origin,
+        );
+    }
+    migrations
+}
+
+fn restored_pane_workspace_origin(
+    saved_pane: Option<&super::snapshot::PaneSnapshot>,
+    migration: Option<&RestoredPaneWorkspaceOrigin>,
+) -> RestoredPaneWorkspaceOrigin {
+    migration
+        .cloned()
+        .unwrap_or_else(|| RestoredPaneWorkspaceOrigin {
+            workspace_id: saved_pane.and_then(|pane| pane.origin_workspace_id.clone()),
+            label: saved_pane.and_then(|pane| pane.origin_workspace_label.clone()),
+        })
+}
 
 /// Restore workspaces from a snapshot. Each pane gets a fresh shell in its saved cwd.
 pub fn restore(
@@ -272,6 +565,17 @@ fn restore_with_imports_and_failures(
     let mut terminal_runtimes = HashMap::new();
     let mut resumed_agent_sessions = HashSet::new();
     let mut failed_imports = 0;
+    let workspace_ids = snapshot
+        .workspaces
+        .iter()
+        .map(|workspace| {
+            workspace
+                .id
+                .clone()
+                .unwrap_or_else(crate::workspace::generate_workspace_id)
+        })
+        .collect::<Vec<_>>();
+    let origin_migrations = legacy_origin_migrations(snapshot, &workspace_ids);
     for (idx, ws_snap) in snapshot.workspaces.iter().enumerate() {
         let runtime_context = RestoreRuntimeContext {
             scrollback_limit_bytes,
@@ -283,6 +587,9 @@ fn restore_with_imports_and_failures(
         };
         let (restored, workspace_failed_imports) = restore_workspace(
             ws_snap,
+            idx,
+            &workspace_ids[idx],
+            &origin_migrations,
             history.and_then(|history| history.workspaces.get(idx)),
             rows,
             cols,
@@ -305,6 +612,9 @@ fn restore_with_imports_and_failures(
 
 fn restore_workspace(
     snap: &WorkspaceSnapshot,
+    workspace_idx: usize,
+    workspace_id: &str,
+    origin_migrations: &LegacyOriginMigrations,
     history: Option<&WorkspaceHistorySnapshot>,
     rows: u16,
     cols: u16,
@@ -315,10 +625,6 @@ fn restore_workspace(
     let mut tabs = Vec::new();
     let mut terminals = Vec::new();
     let mut terminal_runtimes = HashMap::new();
-    let workspace_id = snap
-        .id
-        .clone()
-        .unwrap_or_else(crate::workspace::generate_workspace_id);
     let mut next_public_pane_number = snap
         .public_pane_numbers
         .values()
@@ -355,17 +661,23 @@ fn restore_workspace(
 
     for (idx, tab_snap) in snap.tabs.iter().enumerate() {
         let tab_number = snap.public_tab_numbers.get(idx).copied().unwrap_or(idx + 1);
+        let identity_context = RestoreTabIdentityContext {
+            number: tab_number,
+            workspace_id,
+            workspace_idx,
+            tab_idx: idx,
+            origin_migrations,
+            public_pane_ids_by_old_raw: &public_pane_ids_by_old_raw,
+        };
         let (restored_tab, tab_failed_imports) = restore_tab(
             tab_snap,
             history.and_then(|history| history.tabs.get(idx)),
-            tab_number,
-            &workspace_id,
+            &identity_context,
             rows,
             cols,
             runtime_context,
             resumed_agent_sessions,
             imported_panes,
-            &public_pane_ids_by_old_raw,
         );
         failed_imports += tab_failed_imports;
         let Some((mut tab, restored_terminals, restored_runtimes, reverse_id_map)) = restored_tab
@@ -408,7 +720,7 @@ fn restore_workspace(
 
     (
         Some(Workspace {
-            id: workspace_id,
+            id: workspace_id.to_string(),
             custom_name: snap.custom_name.clone(),
             identity_cwd: snap.identity_cwd.clone(),
             cached_identity_cwd: snap.identity_cwd.clone(),
@@ -446,14 +758,12 @@ fn restored_worktree_space_membership(
 fn restore_tab(
     snap: &TabSnapshot,
     history: Option<&TabHistorySnapshot>,
-    number: usize,
-    workspace_id: &str,
+    identity_context: &RestoreTabIdentityContext<'_>,
     rows: u16,
     cols: u16,
     runtime_context: &RestoreRuntimeContext<'_>,
     resumed_agent_sessions: &mut HashSet<String>,
     imported_panes: &mut HashMap<u32, crate::handoff_runtime::ImportedHandoffRuntime>,
-    public_pane_ids_by_old_raw: &HashMap<u32, String>,
 ) -> RestoreFailures<Option<RestoredTab>> {
     let (node, id_map) = restore_node_remapped(&snap.layout);
     let reverse_id_map: HashMap<PaneId, u32> = id_map
@@ -469,6 +779,16 @@ fn restore_tab(
     for id in &pane_ids {
         let old_id = reverse_id_map.get(id);
         let saved_pane = old_id.and_then(|old_id| snap.panes.get(old_id));
+        let pane_workspace_origin = restored_pane_workspace_origin(
+            saved_pane,
+            old_id.and_then(|old_id| {
+                identity_context.origin_migrations.get(&(
+                    identity_context.workspace_idx,
+                    identity_context.tab_idx,
+                    *old_id,
+                ))
+            }),
+        );
         let saved_cwd = saved_pane
             .map(|p| p.cwd.clone())
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into()));
@@ -515,13 +835,16 @@ fn restore_tab(
 
         let old_pane_id = reverse_id_map.get(id).copied();
         let public_pane_id = old_pane_id
-            .and_then(|old_id| public_pane_ids_by_old_raw.get(&old_id))
+            .and_then(|old_id| identity_context.public_pane_ids_by_old_raw.get(&old_id))
             .map(String::as_str);
         let launch_env = public_pane_id
             .map(|pane_id| {
                 PaneLaunchEnv::from_extra(Vec::new()).with_identity(
-                    workspace_id.to_string(),
-                    crate::workspace::public_tab_id_for_number(workspace_id, number),
+                    identity_context.workspace_id.to_string(),
+                    crate::workspace::public_tab_id_for_number(
+                        identity_context.workspace_id,
+                        identity_context.number,
+                    ),
                     pane_id.to_string(),
                 )
             })
@@ -561,7 +884,9 @@ fn restore_tab(
                     std::time::Instant::now(),
                 );
             }
-            panes.insert(*id, PaneState::new(terminal_id));
+            let mut pane_state = PaneState::new(terminal_id);
+            pane_workspace_origin.apply_to(&mut pane_state);
+            panes.insert(*id, pane_state);
             terminals.push(terminal);
             continue;
         }
@@ -660,7 +985,9 @@ fn restore_tab(
                         std::time::Instant::now(),
                     );
                 }
-                panes.insert(*id, PaneState::new(terminal_id.clone()));
+                let mut pane_state = PaneState::new(terminal_id.clone());
+                pane_workspace_origin.apply_to(&mut pane_state);
+                panes.insert(*id, pane_state);
                 terminal_runtimes.insert(terminal_id, runtime);
                 terminals.push(terminal);
             }
@@ -717,7 +1044,7 @@ fn restore_tab(
         Some((
             crate::workspace::Tab {
                 custom_name: snap.custom_name.clone(),
-                number,
+                number: identity_context.number,
                 root_pane,
                 layout,
                 panes,
@@ -917,6 +1244,50 @@ fn collect_ids_inner(node: &Node, ids: &mut Vec<PaneId>) {
 mod tests {
     use super::*;
 
+    fn migration_pane(
+        cwd: PathBuf,
+        origin_workspace_id: Option<&str>,
+        origin_workspace_label: Option<&str>,
+    ) -> super::super::snapshot::PaneSnapshot {
+        super::super::snapshot::PaneSnapshot {
+            cwd,
+            label: None,
+            agent_name: None,
+            managed_agent_kind: None,
+            agent_session: None,
+            launch_argv: None,
+            origin_workspace_id: origin_workspace_id.map(str::to_string),
+            origin_workspace_label: origin_workspace_label.map(str::to_string),
+        }
+    }
+
+    fn migration_workspace(
+        id: &str,
+        custom_name: Option<&str>,
+        identity_cwd: PathBuf,
+        panes: HashMap<u32, super::super::snapshot::PaneSnapshot>,
+    ) -> WorkspaceSnapshot {
+        WorkspaceSnapshot {
+            id: Some(id.into()),
+            custom_name: custom_name.map(str::to_string),
+            identity_cwd,
+            worktree_space: None,
+            public_pane_numbers: HashMap::new(),
+            next_public_pane_number: 0,
+            public_tab_numbers: Vec::new(),
+            next_public_tab_number: 0,
+            tabs: vec![TabSnapshot {
+                custom_name: None,
+                layout: LayoutSnapshot::Pane(0),
+                panes,
+                zoomed: false,
+                focused: Some(0),
+                root_pane: Some(0),
+            }],
+            active_tab: 0,
+        }
+    }
+
     fn test_session_path(name: &str) -> String {
         std::env::current_dir()
             .unwrap()
@@ -1032,6 +1403,22 @@ mod tests {
             value: test_session_path("claude-session"),
         };
         assert!(restore_plan_for_snapshot(&unsupported_path, true).is_none());
+    }
+
+    #[test]
+    fn restore_plan_resumes_official_qwen_session_id() {
+        let session = super::super::snapshot::PaneAgentSessionSnapshot {
+            source: "herdr:qwen".into(),
+            agent: "qwen".into(),
+            kind: crate::agent_resume::AgentSessionRefKind::Id,
+            value: "qwen-session".into(),
+        };
+
+        assert!(restore_plan_for_snapshot(&session, false).is_none());
+        assert_eq!(
+            restore_plan_for_snapshot(&session, true).unwrap().argv,
+            vec!["qwen", "--resume", "qwen-session"]
+        );
     }
 
     #[test]
@@ -1198,6 +1585,8 @@ mod tests {
                                 value: "opencode-session".into(),
                             }),
                             launch_argv: None,
+                            origin_workspace_id: None,
+                            origin_workspace_label: Some("legacy-source".into()),
                         },
                     )]),
                     zoomed: false,
@@ -1214,7 +1603,7 @@ mod tests {
         };
         let (events, _event_rx) = mpsc::channel(4);
 
-        let (_workspaces, terminals, _runtimes) = restore(
+        let (workspaces, terminals, _runtimes) = restore(
             &snapshot,
             None,
             24,
@@ -1245,6 +1634,186 @@ mod tests {
         assert_eq!(session.source, "herdr:opencode");
         assert_eq!(session.agent, "opencode");
         assert_eq!(session.session_ref.value, "opencode-session");
+        let pane_id = workspaces[0].tabs[0].root_pane;
+        let pane = workspaces[0].pane_state(pane_id).expect("restored pane");
+        let expected_origin_id =
+            crate::pane::legacy_origin_workspace_id("label:workspace:legacy-source");
+        assert_eq!(
+            pane.origin_workspace_id.as_deref(),
+            Some(expected_origin_id.as_str())
+        );
+        assert_eq!(
+            pane.origin_workspace_label.as_deref(),
+            Some("legacy-source")
+        );
+    }
+
+    #[test]
+    fn legacy_origin_migration_repairs_production_target_label_corruption() {
+        let root = std::env::temp_dir().join("herdr-legacy-origin-production-regression");
+        let paihang = root.join("paihang2");
+        let modified = root.join("modified_nyater");
+        let dou = root.join("dou_max");
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![
+                migration_workspace(
+                    "w-paihang",
+                    None,
+                    paihang.clone(),
+                    HashMap::from([(
+                        0,
+                        migration_pane(
+                            paihang,
+                            Some("legacy-origin:modified_nyater"),
+                            Some("modified_nyater"),
+                        ),
+                    )]),
+                ),
+                migration_workspace(
+                    "w-modified",
+                    None,
+                    modified.clone(),
+                    HashMap::from([
+                        (0, migration_pane(modified, None, Some("modified_nyater"))),
+                        (
+                            1,
+                            migration_pane(dou.clone(), None, Some("modified_nyater")),
+                        ),
+                    ]),
+                ),
+            ],
+            active: Some(1),
+            selected: 1,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+        };
+        let workspace_ids = vec!["w-paihang".into(), "w-modified".into()];
+
+        let migrations = legacy_origin_migrations(&snapshot, &workspace_ids);
+
+        assert_eq!(
+            migrations.get(&(0, 0, 0)),
+            Some(&RestoredPaneWorkspaceOrigin::default())
+        );
+        assert_eq!(
+            migrations.get(&(1, 0, 0)),
+            Some(&RestoredPaneWorkspaceOrigin::default())
+        );
+        let dou_origin = migrations.get(&(1, 0, 1)).expect("dou_max migration");
+        assert_eq!(dou_origin.label.as_deref(), Some("dou_max"));
+        assert_eq!(
+            dou_origin.workspace_id,
+            Some(crate::pane::legacy_origin_workspace_id(&format!(
+                "cwd:{}",
+                snapshot_cwd_identity(&dou).stable_key
+            )))
+        );
+    }
+
+    #[test]
+    fn legacy_origin_migration_binds_a_matching_live_workspace_and_keeps_explicit_ids() {
+        let root = std::env::temp_dir().join("herdr-legacy-origin-live-workspace");
+        let source = root.join("source");
+        let host = root.join("host");
+        let unrelated = root.join("unrelated");
+        let explicit_id = crate::pane::legacy_origin_workspace_id("cwd:already-migrated");
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![
+                migration_workspace(
+                    "w-source",
+                    Some("排行榜"),
+                    source.clone(),
+                    HashMap::from([(0, migration_pane(source.clone(), None, None))]),
+                ),
+                migration_workspace(
+                    "w-host",
+                    None,
+                    host.clone(),
+                    HashMap::from([
+                        (0, migration_pane(source, None, Some("host"))),
+                        (
+                            1,
+                            migration_pane(unrelated, Some(&explicit_id), Some("explicit-source")),
+                        ),
+                        (2, migration_pane(root.join("plain-pane"), None, None)),
+                    ]),
+                ),
+            ],
+            active: Some(1),
+            selected: 1,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+        };
+        let workspace_ids = vec!["w-source".into(), "w-host".into()];
+
+        let migrations = legacy_origin_migrations(&snapshot, &workspace_ids);
+
+        assert_eq!(
+            migrations.get(&(1, 0, 0)),
+            Some(&RestoredPaneWorkspaceOrigin {
+                workspace_id: Some("w-source".into()),
+                label: Some("排行榜".into()),
+            })
+        );
+        assert!(!migrations.contains_key(&(1, 0, 1)));
+        assert!(!migrations.contains_key(&(1, 0, 2)));
+        let explicit = restored_pane_workspace_origin(
+            snapshot.workspaces[1].tabs[0].panes.get(&1),
+            migrations.get(&(1, 0, 1)),
+        );
+        assert_eq!(explicit.workspace_id.as_deref(), Some(explicit_id.as_str()));
+        assert_eq!(explicit.label.as_deref(), Some("explicit-source"));
+    }
+
+    #[test]
+    fn legacy_origin_migration_does_not_leak_label_evidence_across_hosts() {
+        let root = std::env::temp_dir().join("herdr-legacy-origin-host-scope");
+        let source_host = root.join("source-host");
+        let other_host = root.join("other-host");
+        let external = root.join("external-source");
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![
+                migration_workspace(
+                    "w-source-host",
+                    Some("shared"),
+                    source_host.clone(),
+                    HashMap::from([(0, migration_pane(source_host, None, Some("shared")))]),
+                ),
+                migration_workspace(
+                    "w-other-host",
+                    Some("other-host"),
+                    other_host,
+                    HashMap::from([(0, migration_pane(external, None, Some("shared")))]),
+                ),
+            ],
+            active: Some(1),
+            selected: 1,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+        };
+        let workspace_ids = vec!["w-source-host".into(), "w-other-host".into()];
+
+        let migrations = legacy_origin_migrations(&snapshot, &workspace_ids);
+
+        assert_eq!(
+            migrations.get(&(0, 0, 0)),
+            Some(&RestoredPaneWorkspaceOrigin::default())
+        );
+        assert_eq!(
+            migrations.get(&(1, 0, 0)),
+            Some(&RestoredPaneWorkspaceOrigin {
+                workspace_id: Some(crate::pane::legacy_origin_workspace_id(
+                    "label:w-other-host:shared"
+                )),
+                label: Some("shared".into()),
+            })
+        );
     }
 
     #[tokio::test]
@@ -1279,6 +1848,8 @@ mod tests {
                                 managed_agent_kind: None,
                                 agent_session: None,
                                 launch_argv: None,
+                                origin_workspace_id: None,
+                                origin_workspace_label: None,
                             },
                         ),
                         (
@@ -1290,6 +1861,8 @@ mod tests {
                                 managed_agent_kind: None,
                                 agent_session: None,
                                 launch_argv: None,
+                                origin_workspace_id: None,
+                                origin_workspace_label: None,
                             },
                         ),
                     ]),
@@ -1343,6 +1916,8 @@ mod tests {
                     managed_agent_kind: None,
                     agent_session: None,
                     launch_argv: None,
+                    origin_workspace_id: None,
+                    origin_workspace_label: None,
                 },
             )
         };
@@ -1358,6 +1933,8 @@ mod tests {
                 value: "codex-session".into(),
             }),
             launch_argv: None,
+            origin_workspace_id: None,
+            origin_workspace_label: None,
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1509,6 +2086,8 @@ mod tests {
                                 value: "codex-session".into(),
                             }),
                             launch_argv: None,
+                            origin_workspace_id: None,
+                            origin_workspace_label: None,
                         },
                     )]),
                     zoomed: false,
@@ -1670,6 +2249,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                origin_workspace_id: None,
+                origin_workspace_label: None,
             },
         );
         let history = SessionHistorySnapshot {

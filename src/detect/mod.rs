@@ -45,6 +45,7 @@ pub enum Agent {
     Claude,
     Codex,
     Gemini,
+    Qwen,
     Cursor,
     Devin,
     Antigravity,
@@ -72,6 +73,7 @@ impl Agent {
         Self::Claude,
         Self::Codex,
         Self::Gemini,
+        Self::Qwen,
         Self::Cursor,
         Self::Devin,
         Self::Antigravity,
@@ -98,6 +100,7 @@ impl Agent {
         Self::Claude,
         Self::Codex,
         Self::Gemini,
+        Self::Qwen,
         Self::Cursor,
         Self::Devin,
         Self::Antigravity,
@@ -124,6 +127,7 @@ pub fn agent_label(agent: Agent) -> &'static str {
         Agent::Claude => "claude",
         Agent::Codex => "codex",
         Agent::Gemini => "gemini",
+        Agent::Qwen => "qwen",
         Agent::Cursor => "cursor",
         Agent::Devin => "devin",
         Agent::Antigravity => "agy",
@@ -152,13 +156,8 @@ pub fn interactive_agent_executable(agent: Agent) -> &'static str {
         Agent::Claude => "claude",
         Agent::Codex => "codex",
         Agent::Gemini => "gemini",
-        Agent::Cursor => {
-            if cfg!(windows) {
-                "cursor-agent.cmd"
-            } else {
-                "cursor-agent"
-            }
-        }
+        Agent::Qwen => "qwen",
+        Agent::Cursor => "cursor-agent",
         Agent::Devin => "devin",
         Agent::Antigravity => "agy",
         Agent::Cline => "cline",
@@ -197,6 +196,7 @@ fn lookup_agent(name: &str) -> Option<Agent> {
         "claude" | "claude-code" => Some(Agent::Claude),
         "codex" => Some(Agent::Codex),
         "gemini" => Some(Agent::Gemini),
+        "qwen" | "qwen-code" | "qwen code" => Some(Agent::Qwen),
         "cursor" | "cursor-agent" => Some(Agent::Cursor),
         "devin" | "devin-cli" | "devin cli" => Some(Agent::Devin),
         "agy" | "antigravity" | "antigravity-cli" => Some(Agent::Antigravity),
@@ -322,6 +322,7 @@ pub(crate) fn full_lifecycle_hook_authority(source: &str, agent_label: &str) -> 
             | ("herdr:opencode", "opencode")
             | ("herdr:kilo", "kilo")
             | ("herdr:kimi", "kimi")
+            | ("herdr:qwen", "qwen")
     )
 }
 
@@ -610,6 +611,36 @@ fn agent_name_from_known_package_path(path: &str) -> Option<String> {
         .map(normalized_agent_lookup_name)
         .collect();
 
+    for window in components.windows(3) {
+        if window[0] == "qwen-code"
+            && window[1] == "lib"
+            && matches!(window[2].as_str(), "cli-entry" | "cli")
+        {
+            return Some(agent_label(Agent::Qwen).to_string());
+        }
+    }
+
+    for (package_index, window) in components.windows(3).enumerate() {
+        if window != ["node_modules", "@qwen-code", "qwen-code"] {
+            continue;
+        }
+
+        let entrypoint = &components[package_index + 3..];
+        let is_qwen_entrypoint = matches!(
+            entrypoint,
+            [file] if matches!(file.as_str(), "cli" | "cli-entry")
+        ) || matches!(
+            entrypoint,
+            [directory, file]
+                if (directory == "scripts" && file == "cli-entry")
+                    || (directory == "dist"
+                        && matches!(file.as_str(), "cli" | "index"))
+        );
+        if is_qwen_entrypoint {
+            return Some(agent_label(Agent::Qwen).to_string());
+        }
+    }
+
     for window in components.windows(5) {
         if window
             == [
@@ -758,6 +789,8 @@ mod tests {
         assert_eq!(identify_agent("claude-code"), Some(Agent::Claude));
         assert_eq!(identify_agent("codex"), Some(Agent::Codex));
         assert_eq!(identify_agent("gemini"), Some(Agent::Gemini));
+        assert_eq!(identify_agent("qwen"), Some(Agent::Qwen));
+        assert_eq!(identify_agent("qwen-code"), Some(Agent::Qwen));
         assert_eq!(identify_agent("cursor"), Some(Agent::Cursor));
         assert_eq!(identify_agent("cursor-agent"), Some(Agent::Cursor));
         assert_eq!(identify_agent("devin"), Some(Agent::Devin));
@@ -806,6 +839,7 @@ mod tests {
     fn parse_known_agent_labels() {
         assert_eq!(parse_agent_label("pi"), Some(Agent::Pi));
         assert_eq!(parse_agent_label("claude"), Some(Agent::Claude));
+        assert_eq!(parse_agent_label("qwen-code"), Some(Agent::Qwen));
         assert_eq!(parse_agent_label("cursor-agent"), Some(Agent::Cursor));
         assert_eq!(parse_agent_label("devin-cli"), Some(Agent::Devin));
         assert_eq!(parse_agent_label("agy"), Some(Agent::Antigravity));
@@ -845,14 +879,8 @@ mod tests {
             (Agent::Claude, "claude"),
             (Agent::Codex, "codex"),
             (Agent::Gemini, "gemini"),
-            (
-                Agent::Cursor,
-                if cfg!(windows) {
-                    "cursor-agent.cmd"
-                } else {
-                    "cursor-agent"
-                },
-            ),
+            (Agent::Qwen, "qwen"),
+            (Agent::Cursor, "cursor-agent"),
             (Agent::Devin, "devin"),
             (Agent::Antigravity, "agy"),
             (Agent::Cline, "cline"),
@@ -909,6 +937,12 @@ mod tests {
     }
 
     #[test]
+    fn qwen_hooks_are_full_lifecycle_authority_with_screen_fallback() {
+        assert!(full_lifecycle_hook_authority("herdr:qwen", "qwen"));
+        assert!(Agent::SCREEN_MANIFEST_AGENTS.contains(&Agent::Qwen));
+    }
+
+    #[test]
     fn identify_unknown_processes() {
         assert_eq!(identify_agent("bash"), None);
         assert_eq!(identify_agent("zsh"), None);
@@ -948,80 +982,122 @@ mod tests {
     }
 
     #[test]
-    fn identify_agent_in_job_detects_node_wrapped_qwen() {
-        for argv in [
-            vec!["node", "/home/user/.fnm/bin/qwen"],
-            vec![
+    fn identify_agent_in_job_detects_node_wrapped_qwen_code() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 123,
+            processes: vec![foreground_process(
+                123,
+                "node",
+                &["node", "/usr/local/lib/node_modules/qwen-code/bin/qwen.js"],
+            )],
+        };
+
+        assert_eq!(
+            identify_agent_in_job(&job),
+            Some((Agent::Qwen, "qwen".to_string()))
+        );
+    }
+
+    #[test]
+    fn identify_agent_in_job_detects_current_qwen_code_package_entrypoints() {
+        let commands: [(&str, &[&str]); 5] = [
+            (
                 "node.exe",
-                r"C:\Users\user\AppData\Roaming\npm\node_modules\@qwen-code\qwen-code\dist\index.js",
-            ],
-        ] {
+                &[
+                    "node.exe",
+                    "C:\\Users\\herdr\\AppData\\Roaming\\npm\\node_modules\\@qwen-code\\qwen-code\\cli-entry.js",
+                ],
+            ),
+            (
+                "node.exe",
+                &[
+                    "node.exe",
+                    "--expose-gc",
+                    "C:\\Users\\herdr\\.qwen\\updates\\npm\\hash\\versions\\0.21.0\\node_modules\\@qwen-code\\qwen-code\\cli.js",
+                ],
+            ),
+            (
+                "node",
+                &[
+                    "node",
+                    "/usr/local/lib/node_modules/@qwen-code/qwen-code/scripts/cli-entry.js",
+                ],
+            ),
+            (
+                "node",
+                &[
+                    "node",
+                    "--expose-gc",
+                    "/home/herdr/qwen-code/node_modules/@qwen-code/qwen-code/dist/cli.js",
+                ],
+            ),
+            (
+                "node",
+                &[
+                    "node",
+                    "/home/herdr/qwen-code/node_modules/@qwen-code/qwen-code/dist/index.js",
+                ],
+            ),
+        ];
+
+        for (runtime, argv) in commands {
             let job = crate::platform::ForegroundJob {
                 process_group_id: 123,
-                processes: vec![foreground_process(123, "MainThread", &argv)],
+                processes: vec![foreground_process(123, runtime, argv)],
             };
 
             assert_eq!(
                 identify_agent_in_job(&job),
-                Some((Agent::Qwen, "qwen".to_string()))
+                Some((Agent::Qwen, "qwen".to_string())),
+                "failed to identify Qwen Code command: {argv:?}"
             );
         }
     }
 
     #[test]
-    fn identify_agent_in_job_detects_windows_cursor_install() {
+    fn identify_agent_in_job_detects_standalone_qwen_code_launcher_layout() {
         let job = crate::platform::ForegroundJob {
             process_group_id: 123,
             processes: vec![foreground_process(
                 123,
-                "node.exe",
+                "node",
                 &[
-                    r"C:\Users\user\AppData\Local\cursor-agent\versions\2026.08.11-e8db854\node.exe",
-                    r"C:\Users\user\AppData\Local\cursor-agent\versions\2026.08.11-e8db854\index.js",
+                    "/root/.local/lib/qwen-code/node/bin/node",
+                    "/root/.local/lib/qwen-code/lib/cli-entry.js",
                 ],
             )],
         };
 
         assert_eq!(
             identify_agent_in_job(&job),
-            Some((Agent::Cursor, "cursor".to_string()))
+            Some((Agent::Qwen, "qwen".to_string()))
         );
     }
 
     #[test]
-    fn identify_agent_in_job_ignores_invalid_windows_cursor_install_paths() {
-        for script in [
-            r"C:\Users\user\AppData\Local\cursor-agent\versions\2026.08.11-e8db854\scripts\postinstall.js",
-            r"C:\Users\user\AppData\Local\cursor-agent\versions\2026.08.11-e8db854\index",
-            r"C:\Users\user\AppData\Local\cursor-agent\versions\2026.08.11-e8db854\index.exe",
-        ] {
+    fn identify_agent_in_job_ignores_non_entrypoint_qwen_package_scripts() {
+        let scripts = [
+            "/tmp/node_modules/other/cli.js",
+            "/tmp/node_modules/@qwen-code/qwen-code/scripts/build.js",
+            "/tmp/node_modules/@qwen-code/qwen-code/node_modules/other/cli.js",
+            "/tmp/node_modules/@qwen-code/qwen-code-extra/cli.js",
+            "/tmp/not-qwen-code/lib/cli-entry.js",
+            "/tmp/qwen-code/lib/chunks/cli-entry.js",
+            "/tmp/qwen-code/lib/index.js",
+        ];
+
+        for script in scripts {
             let job = crate::platform::ForegroundJob {
                 process_group_id: 123,
-                processes: vec![foreground_process(
-                    123,
-                    "node.exe",
-                    &[
-                        r"C:\Users\user\AppData\Local\cursor-agent\versions\2026.08.11-e8db854\node.exe",
-                        script,
-                    ],
-                )],
+                processes: vec![foreground_process(123, "node", &["node", script])],
             };
 
-            assert_eq!(identify_agent_in_job(&job), None, "script: {script}");
+            assert_eq!(
+                identify_agent_in_job(&job),
+                None,
+                "unexpectedly identified non-Qwen entrypoint: {script}"
+            );
         }
-
-        let lookalike = crate::platform::ForegroundJob {
-            process_group_id: 123,
-            processes: vec![foreground_process(
-                123,
-                "node.exe",
-                &[
-                    r"C:\Program Files\nodejs\node.exe",
-                    r"C:\workspace\cursor-agent\versions\test\index.js",
-                ],
-            )],
-        };
-        assert_eq!(identify_agent_in_job(&lookalike), None);
     }
 
     #[test]

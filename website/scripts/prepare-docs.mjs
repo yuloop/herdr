@@ -397,6 +397,7 @@ export function rewritePreviewDocContent(
     commit: 'master',
   },
 ) {
+  content = content.replace(/\r\n?/g, '\n');
   const taggedContent = rewriteRepositoryLinks(
     content.replaceAll('/docs/', '/docs/preview/'),
     commit,
@@ -410,11 +411,13 @@ export function rewritePreviewDocContent(
 }
 
 export function rewriteStableDocContent(content, { version, tag, relativePath }) {
+  content = content.replace(/\r\n?/g, '\n');
   const taggedContent = rewriteRepositoryLinks(content, tag);
   return setGeneratedEditUrl(taggedContent, versionedDocSourceUrl(version, relativePath));
 }
 
 export function rewriteVersionDocContent(content, { version, tag, relativePath }) {
+  content = content.replace(/\r\n?/g, '\n');
   const taggedContent = rewriteRepositoryLinks(
     content.replaceAll('/docs/', `/docs/${version}/`),
     tag,

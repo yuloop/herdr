@@ -17,6 +17,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_METADATA = PROJECT_ROOT / "packaging" / "windows" / "conpty.json"
 MARKER_PATH = PurePosixPath("conpty/herdr-conpty.json")
 DOWNLOAD_TIMEOUT_SECONDS = 60
+WINDOWS_SUPPORT_FILES = {
+    PurePosixPath("assets/herdr.png"): PROJECT_ROOT / "website/assets/favicon.png",
+    PurePosixPath("install-terminal-profile.ps1"): PROJECT_ROOT
+    / "scripts/install_windows_terminal_profile.ps1",
+}
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -126,6 +131,13 @@ def stage_bundle(
         staging.mkdir()
         shutil.copy2(herdr_exe, staging / "herdr.exe")
 
+        for destination, source in WINDOWS_SUPPORT_FILES.items():
+            if not source.is_file():
+                raise ValueError(f"Windows support file does not exist: {source}")
+            staged_support_file = staging / destination
+            staged_support_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, staged_support_file)
+
         for item in bundle["files"]:
             try:
                 payload = archive.read(item["source"])
@@ -167,6 +179,7 @@ def stage_bundle(
 
 def expected_stage_files(metadata: dict[str, Any], architecture: str) -> set[str]:
     files = {"herdr.exe", MARKER_PATH.as_posix()}
+    files.update(path.as_posix() for path in WINDOWS_SUPPORT_FILES)
     files.update(item["destination"] for item in metadata["bundles"][architecture]["files"])
     files.update(item["destination"] for item in metadata["notices"])
     return files
@@ -186,6 +199,10 @@ def validate_stage(metadata_path: Path, architecture: str, stage_dir: Path) -> N
         )
     if (stage_dir / MARKER_PATH).read_bytes() != marker_data(metadata, architecture):
         raise ValueError("bundle marker does not match pinned ConPTY metadata")
+    for destination, source in WINDOWS_SUPPORT_FILES.items():
+        path = stage_dir / destination
+        if sha256_file(path) != sha256_file(source):
+            raise ValueError(f"staged Windows support file mismatch for {path}")
     for item in metadata["bundles"][architecture]["files"]:
         path = stage_dir / PurePosixPath(item["destination"])
         actual_hash = sha256_file(path)

@@ -331,9 +331,6 @@ pub struct HeadlessServer {
     shutting_down: bool,
     /// Flag set while exporting live PTYs to a replacement server.
     handoff_in_progress: bool,
-    /// Imported panes get one app-safe resize nudge after the first client attaches.
-    #[cfg(unix)]
-    pending_handoff_repaint_nudge: bool,
     /// Flag set by Ctrl+C or `server stop` signal.
     should_quit: Arc<AtomicBool>,
     /// Channel for receiving server events from client connection threads.
@@ -398,10 +395,17 @@ fn apply_terminal_attach_scroll(
                 .try_send_bytes(Bytes::from(bytes))
                 .map_err(|err| format!("terminal attach alternate scroll input failed: {err}"))?;
         }
-        Some(crate::pane::WheelRouting::HostScroll) | None => match direction {
-            AttachScrollDirection::Up => runtime.scroll_up(lines.max(1) as usize),
-            AttachScrollDirection::Down => runtime.scroll_down(lines.max(1) as usize),
-        },
+        Some(crate::pane::WheelRouting::HostScroll) | None => {
+            let direction = match direction {
+                AttachScrollDirection::Up => crate::terminal::HostScrollDirection::Up,
+                AttachScrollDirection::Down => crate::terminal::HostScrollDirection::Down,
+            };
+            runtime.apply_host_wheel_scroll(
+                direction,
+                KeyModifiers::from_bits_truncate(modifiers),
+                lines.max(1) as usize,
+            );
+        }
     }
     Ok(())
 }
@@ -530,8 +534,6 @@ impl HeadlessServer {
             effective_size: headless_size,
             shutting_down: false,
             handoff_in_progress: false,
-            #[cfg(unix)]
-            pending_handoff_repaint_nudge: false,
             should_quit,
             server_event_rx,
             server_event_tx,
@@ -1518,13 +1520,7 @@ impl HeadlessServer {
 
     #[cfg(unix)]
     fn nudge_handoff_panes_on_first_client_attach(&mut self) {
-        if !self.pending_handoff_repaint_nudge {
-            return;
-        }
-        self.pending_handoff_repaint_nudge = false;
-        self.app
-            .terminal_runtimes
-            .nudge_child_redraw_after_handoff();
+        self.app.terminal_runtimes.nudge_handoff_runtimes_once();
     }
 
     #[cfg(not(unix))]
@@ -5240,7 +5236,6 @@ fn run_handoff_import_server(socket_path: &Path, token: &str) -> io::Result<()> 
         crate::server::handoff::wait_committed(&mut received.stream)?;
         server.app.assume_handoff_ownership();
         server.app.unpause_handoff_readers();
-        server.pending_handoff_repaint_nudge = true;
         if let Err(err) = crate::server::handoff::report_owned(&mut received.stream) {
             warn!(err = %err, "failed to report handoff ownership; continuing as owner");
         }
@@ -5413,7 +5408,8 @@ mod tests {
             shutting_down: false,
             handoff_in_progress: false,
             #[cfg(unix)]
-            pending_handoff_repaint_nudge: false,
+            should_quit: Arc::new(AtomicBool::new(false)),
+            #[cfg(windows)]
             should_quit,
             server_event_rx,
             server_event_tx,
@@ -7200,6 +7196,152 @@ next_tab = ""
     }
 
     #[test]
+    fn accelerated_wheel_terminal_attach_uses_lines_page_and_endpoints() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let _runtime_guard = rt.enter();
+        let bytes = (0..80)
+            .map(|line| format!("{line:06}\r\n"))
+            .collect::<String>()
+            .into_bytes();
+        let runtime =
+            crate::terminal::TerminalRuntime::test_with_scrollback_bytes(20, 5, 4096, &bytes);
+        let apply_wheel = |direction, modifiers: KeyModifiers| {
+            apply_terminal_attach_scroll(
+                &runtime,
+                AttachScrollSource::Wheel,
+                direction,
+                3,
+                None,
+                None,
+                modifiers.bits(),
+            )
+            .expect("attach wheel scroll");
+        };
+
+        apply_wheel(AttachScrollDirection::Up, KeyModifiers::empty());
+        let metrics = runtime.scroll_metrics().expect("scroll metrics");
+        assert_eq!(metrics.offset_from_bottom, 3);
+        let page_lines = metrics.viewport_rows.saturating_sub(1).max(1);
+
+        apply_wheel(AttachScrollDirection::Up, KeyModifiers::SHIFT);
+        let metrics = runtime.scroll_metrics().expect("scroll metrics");
+        assert_eq!(
+            metrics.offset_from_bottom,
+            (3 + page_lines).min(metrics.max_offset_from_bottom)
+        );
+
+        apply_wheel(AttachScrollDirection::Up, KeyModifiers::CONTROL);
+        let metrics = runtime.scroll_metrics().expect("scroll metrics");
+        assert_eq!(metrics.offset_from_bottom, metrics.max_offset_from_bottom);
+
+        apply_wheel(AttachScrollDirection::Down, KeyModifiers::SUPER);
+        assert_eq!(
+            runtime
+                .scroll_metrics()
+                .expect("scroll metrics")
+                .offset_from_bottom,
+            0
+        );
+
+        drop(runtime);
+        drop(_runtime_guard);
+        rt.shutdown_timeout(Duration::from_millis(100));
+    }
+
+    #[test]
+    fn terminal_attach_mouse_reporting_wheel_modifiers_do_not_host_scroll() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let _runtime_guard = rt.enter();
+        let mut bytes = (0..80)
+            .map(|line| format!("{line:06}\r\n"))
+            .collect::<String>()
+            .into_bytes();
+        bytes.extend_from_slice(b"\x1b[?1000h\x1b[?1006h");
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                20, 5, 4096, &bytes, 4,
+            );
+
+        apply_terminal_attach_scroll(
+            &runtime,
+            AttachScrollSource::Wheel,
+            AttachScrollDirection::Up,
+            3,
+            Some(1),
+            Some(1),
+            KeyModifiers::CONTROL.bits(),
+        )
+        .expect("mouse reporting wheel");
+
+        assert_eq!(
+            runtime
+                .scroll_metrics()
+                .expect("scroll metrics")
+                .offset_from_bottom,
+            0
+        );
+        assert!(!input_rx
+            .try_recv()
+            .expect("mouse report wheel input")
+            .is_empty());
+
+        drop(runtime);
+        drop(_runtime_guard);
+        rt.shutdown_timeout(Duration::from_millis(100));
+    }
+
+    #[test]
+    fn terminal_attach_alternate_scroll_modifiers_do_not_host_scroll() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let _runtime_guard = rt.enter();
+        let mut bytes = (0..80)
+            .map(|line| format!("{line:06}\r\n"))
+            .collect::<String>()
+            .into_bytes();
+        bytes.extend_from_slice(b"\x1b[?1049h\x1b[?1007h");
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                20, 5, 4096, &bytes, 4,
+            );
+
+        apply_terminal_attach_scroll(
+            &runtime,
+            AttachScrollSource::Wheel,
+            AttachScrollDirection::Up,
+            3,
+            None,
+            None,
+            KeyModifiers::SHIFT.bits(),
+        )
+        .expect("alternate scroll wheel");
+
+        assert_eq!(
+            runtime
+                .scroll_metrics()
+                .expect("scroll metrics")
+                .offset_from_bottom,
+            0
+        );
+        assert!(!input_rx
+            .try_recv()
+            .expect("alternate scroll input")
+            .is_empty());
+
+        drop(runtime);
+        drop(_runtime_guard);
+        rt.shutdown_timeout(Duration::from_millis(100));
+    }
+
+    #[test]
     fn terminal_attach_input_resets_scrolled_viewport() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -8711,6 +8853,7 @@ next_tab = ""
         for mode in [
             crate::app::Mode::GlobalMenu,
             crate::app::Mode::ContextMenu,
+            crate::app::Mode::PaneLayout,
             crate::app::Mode::Navigator,
         ] {
             assert!(!events_are_render_neutral_mouse_motion(&events, mode));
@@ -9939,6 +10082,37 @@ next_tab = ""
                     .expect("mouse capture message")
             ),
             ServerMessage::MouseCapture { enabled: true, .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn settings_forces_host_mouse_capture_for_headless_client() {
+        let mut server = test_headless_server();
+        let (client_tx, client_control_rx, _client_rx) = test_client_writer();
+        server.clients.insert(
+            1,
+            ClientConnection::new(
+                (80, 24),
+                crate::kitty_graphics::HostCellSize::default(),
+                crate::terminal_theme::TerminalTheme::default(),
+                None,
+                1,
+                RenderEncoding::SemanticFrame,
+                Some(client_tx),
+            ),
+        );
+        server.app.state.mouse_capture = false;
+        server.app.state.mode = crate::app::Mode::Settings;
+
+        server.stream_host_mouse_capture_mode();
+
+        assert!(matches!(
+            read_server_message(
+                client_control_rx
+                    .recv_timeout(Duration::from_millis(100))
+                    .expect("mouse capture message")
+            ),
+            ServerMessage::MouseCapture { enabled: true }
         ));
     }
 

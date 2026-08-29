@@ -7,6 +7,7 @@ use crate::{
         App, Mode,
     },
     config::{StatusIndicatorStyle, ToastDelivery},
+    ui::text::display_width_u16,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -313,6 +314,13 @@ pub(crate) fn open_settings_at(state: &mut AppState, section: SettingsSection) {
     state.mode = Mode::Settings;
 }
 
+fn rect_contains(rect: Rect, col: u16, row: u16) -> bool {
+    col >= rect.x
+        && col < rect.x.saturating_add(rect.width)
+        && row >= rect.y
+        && row < rect.y.saturating_add(rect.height)
+}
+
 impl AppState {
     fn settings_popup_rect(&self) -> Rect {
         crate::ui::centered_popup_rect(
@@ -346,7 +354,9 @@ impl AppState {
             } else {
                 0
             };
-            let width = section.label().len() as u16 + 2 + badge_width;
+            // 用显示宽度(中文每字 2 cell)而非字节长度,确保点击区域与渲染一致。
+            // 渲染用 display_label()(已汉化),点击区域也必须按其显示宽度算。
+            let width = display_width_u16(&section.display_label()) + 2 + badge_width;
             if col >= x && col < x + width {
                 return Some(*section);
             }
@@ -409,7 +419,20 @@ impl AppState {
     pub(super) fn handle_settings_mouse(&mut self, mouse: MouseEvent) -> Option<SettingsAction> {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                if let Some(section) = self.settings_tab_at(mouse.column, mouse.row) {
+                let tab = self.settings_tab_at(mouse.column, mouse.row);
+                #[cfg(windows)]
+                if std::env::var_os("HERDR_WINDOWS_INPUT_TRACE").is_some() {
+                    tracing::info!(
+                        column = mouse.column,
+                        row = mouse.row,
+                        popup = ?self.settings_popup_rect(),
+                        inner = ?self.settings_inner_rect(),
+                        current_section = ?self.settings.section,
+                        tab = ?tab,
+                        "windows input trace: settings mouse hit test"
+                    );
+                }
+                if let Some(section) = tab {
                     self.settings.section = section;
                     self.settings.list.select(match section {
                         SettingsSection::Theme => current_theme_index(&self.theme_name),
@@ -423,6 +446,14 @@ impl AppState {
                         }
                         SettingsSection::Integrations => 0,
                     });
+                    #[cfg(windows)]
+                    if std::env::var_os("HERDR_WINDOWS_INPUT_TRACE").is_some() {
+                        tracing::info!(
+                            section = ?self.settings.section,
+                            selected = self.settings.list.selected,
+                            "windows input trace: settings tab selected"
+                        );
+                    }
                     return None;
                 }
                 if let Some(idx) = self.settings_list_index_at(mouse.column, mouse.row) {
@@ -465,10 +496,13 @@ impl AppState {
                         cancel_settings(self);
                         None
                     }
-                    _ => {
-                        cancel_settings(self);
+                    None => {
+                        if !rect_contains(self.settings_popup_rect(), mouse.column, mouse.row) {
+                            cancel_settings(self);
+                        }
                         None
                     }
+                    _ => None,
                 }
             }
             _ => None,
@@ -612,6 +646,94 @@ mod tests {
         app.handle_mouse(mouse(MouseEventKind::Moved, area.x + 2, area.y + 2));
 
         assert_eq!(app.state.settings.list.selected, 0);
+    }
+
+    #[test]
+    fn settings_click_inside_noninteractive_content_stays_open() {
+        let mut app = app_for_mouse_test();
+        open_settings_at(&mut app.state, SettingsSection::Indicators);
+
+        let content = app.state.settings_content_rect();
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            content.x + 1,
+            content.y,
+        ));
+
+        assert_eq!(app.state.mode, Mode::Settings);
+    }
+
+    #[test]
+    fn settings_click_outside_popup_closes() {
+        let mut app = app_for_mouse_test();
+        open_settings_at(&mut app.state, SettingsSection::Indicators);
+
+        let popup = app.state.settings_popup_rect();
+        assert!(popup.x > 0, "test screen should leave space outside popup");
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            popup.x - 1,
+            popup.y,
+        ));
+
+        assert_eq!(app.state.mode, Mode::Navigate);
+    }
+
+    #[test]
+    fn settings_click_close_button_closes() {
+        let mut app = app_for_mouse_test();
+        open_settings_at(&mut app.state, SettingsSection::Indicators);
+
+        let inner = app.state.settings_inner_rect();
+        let (_, close) = crate::ui::settings_button_rects(
+            inner,
+            app.state.settings.section,
+            crate::ui::settings_show_primary_action(&app.state),
+        );
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            close.x + close.width - 1,
+            close.y,
+        ));
+
+        assert_eq!(app.state.mode, Mode::Navigate);
+    }
+
+    #[test]
+    fn settings_tab_click_uses_rendered_localized_widths() {
+        let mut app = app_for_mouse_test();
+        // Match the 160x50 Windows Terminal geometry used by the packaged client.
+        app.state.view.sidebar_rect = Rect::new(0, 0, 20, 50);
+        app.state.view.terminal_area = Rect::new(20, 1, 140, 49);
+        open_settings_at(&mut app.state, SettingsSection::Theme);
+
+        let inner = app.state.settings_inner_rect();
+        let sound_index = SettingsSection::ALL
+            .iter()
+            .position(|section| *section == SettingsSection::Sound)
+            .expect("sound settings tab should be present");
+        let sound_x = inner.x
+            + SettingsSection::ALL[..sound_index]
+                .iter()
+                .map(|section| {
+                    let badge_width = if app.state.settings_section_has_badge(*section) {
+                        2
+                    } else {
+                        0
+                    };
+                    display_width_u16(&section.display_label()) + 3 + badge_width
+                })
+                .sum::<u16>()
+            + 1;
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            sound_x,
+            inner.y + 1,
+        ));
+
+        assert_eq!(app.state.settings.section, SettingsSection::Sound);
+        assert_eq!(app.state.mode, Mode::Settings);
     }
 
     #[test]

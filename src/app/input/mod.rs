@@ -43,6 +43,7 @@ mod modal;
 mod mouse;
 mod navigate;
 mod overlays;
+mod pane_layout;
 mod selection;
 mod settings;
 mod sidebar;
@@ -83,6 +84,9 @@ impl App {
             return self.handle_terminal_key(key).await;
         }
         let key_event = key.as_key_event();
+        if key_event.code == KeyCode::Esc && self.state.pane_title_press.take().is_some() {
+            return None;
+        }
         if modal_paste_target_active(&self.state) && is_modal_paste_shortcut(&key_event) {
             if let Some(text) = crate::platform::read_clipboard_text() {
                 self.paste_into_active_text_input(&text);
@@ -111,6 +115,7 @@ impl App {
                 Mode::ContextMenu => {
                     self.handle_context_menu_key_via_api(key_event);
                 }
+                Mode::PaneLayout => self.handle_pane_layout_key_via_api(key_event),
                 Mode::Settings => self.handle_settings_key(key_event),
                 Mode::GlobalMenu => handle_global_menu_key(&mut self.state, key_event),
                 Mode::KeybindHelp => handle_keybind_help_key(&mut self.state, key),
@@ -443,6 +448,7 @@ impl App {
                         self.apply_rename_mouse_action_via_api(action)
                     }
                     MouseAction::ConfirmCloseAccept => self.confirm_close_accept_via_api(),
+                    MouseAction::CommitPaneLayout => self.commit_pane_layout_via_api(),
                     MouseAction::ContextMenu { menu, idx } => {
                         self.apply_context_menu_action_via_api(menu, idx)
                     }
@@ -513,11 +519,12 @@ impl App {
                 }
                 Some(crate::pane::WheelRouting::HostScroll) | None => {
                     let lines_per_notch = self.state.mouse_scroll_lines;
-                    match mouse.kind {
-                        MouseEventKind::ScrollUp => rt.scroll_up(lines_per_notch),
-                        MouseEventKind::ScrollDown => rt.scroll_down(lines_per_notch),
-                        _ => {}
-                    }
+                    let direction = match mouse.kind {
+                        MouseEventKind::ScrollUp => crate::terminal::HostScrollDirection::Up,
+                        MouseEventKind::ScrollDown => crate::terminal::HostScrollDirection::Down,
+                        _ => return,
+                    };
+                    rt.apply_host_wheel_scroll(direction, mouse.modifiers, lines_per_notch);
                     return;
                 }
             },
@@ -622,6 +629,11 @@ impl App {
     }
 
     fn handle_pane_double_click(&mut self, mouse: MouseEvent) -> bool {
+        if self.state.copy_on_select.is_disabled() {
+            self.last_pane_click = None;
+            return false;
+        }
+
         // A pane press stops being a double-click candidate once it becomes
         // a drag or completes as a real text selection.
         match mouse.kind {
@@ -706,9 +718,8 @@ impl App {
             click.col,
         );
         if selected {
-            self.selection_highlight_clear_deadline = self
-                .state
-                .copy_on_select
+            self.selection_highlight_clear_deadline = (self.state.copy_on_select
+                == crate::config::CopyOnSelectModeConfig::Clipboard)
                 .then(|| std::time::Instant::now() + super::PANE_COPY_HIGHLIGHT_DURATION);
         }
         selected
@@ -833,13 +844,11 @@ fn state_with_workspaces(names: &[&str]) -> AppState {
 #[cfg(test)]
 fn app_for_mouse_test() -> App {
     let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut app = App::new(
-        &crate::config::Config::default(),
-        true,
-        None,
-        api_rx,
-        crate::api::EventHub::default(),
-    );
+    // Most mouse fixtures characterize the legacy immediate-copy path. Keep
+    // that opt-in explicit now that production defaults to manual copying.
+    let mut config = crate::config::Config::default();
+    config.ui.copy_on_select = crate::config::CopyOnSelectModeConfig::Clipboard;
+    let mut app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
     app.state.mode = Mode::Terminal;
     app.state.update_available = None;
     app.state.latest_release_notes_available = false;

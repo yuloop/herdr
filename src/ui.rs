@@ -11,6 +11,7 @@ mod menus;
 mod mobile;
 mod navigator;
 mod onboarding;
+mod pane_layout;
 mod panes;
 mod release_notes;
 mod scrollbar;
@@ -19,7 +20,7 @@ mod sidebar;
 mod status;
 mod tab_surface;
 mod tabs;
-mod text;
+pub(crate) mod text;
 mod widgets;
 
 use self::dialogs::{
@@ -39,6 +40,7 @@ use self::mobile::{
 use self::navigator::render_navigator_overlay;
 pub(crate) use self::onboarding::onboarding_welcome_continue_rect;
 use self::onboarding::render_onboarding_overlay;
+use self::pane_layout::render_pane_layout_overlay;
 pub(crate) use self::panes::popup_pane_rects;
 use self::panes::{render_empty, render_popup_pane, resize_popup_pane};
 pub(crate) use self::release_notes::{
@@ -79,7 +81,8 @@ pub(crate) use self::{
         agent_entry_gap, agent_entry_height_in_body, agent_panel_body_rect, agent_panel_entries,
         agent_panel_scroll_for_target, agent_panel_scroll_metrics, agent_panel_scrollbar_rect,
         agent_panel_toggle_rect, all_agent_panel_entries, collapsed_sidebar_sections,
-        collapsed_sidebar_toggle_rect, compute_workspace_card_areas, expanded_sidebar_sections,
+        collapsed_sidebar_toggle_rect, compute_origin_workspace_card_areas,
+        compute_workspace_card_areas, compute_workspace_list_areas, expanded_sidebar_sections,
         expanded_sidebar_toggle_rect, normalized_workspace_scroll, sidebar_section_divider_rect,
         workspace_drop_slots, workspace_group_chevron_rect, workspace_list_entries,
         workspace_list_entries_expanded, workspace_list_rect, workspace_list_scroll_metrics,
@@ -94,6 +97,7 @@ pub(crate) use self::{
         mobile_switcher_areas, mobile_switcher_max_scroll, mobile_switcher_target_at,
         mobile_switcher_workspace_doc_range, MobileSwitcherTarget,
     },
+    pane_layout::{pane_layout_preset_at, pane_transfer_destination_at},
     panes::{apply_pane_chrome, pane_inner_rect, pane_is_scrolled_back},
     tab_surface::{tab_surface_cursor, tab_surface_hyperlinks, TabSurfaceView},
     tabs::{compute_tab_bar_view, tab_bar_content_area},
@@ -255,10 +259,10 @@ fn compute_view_internal(
         app.agent_panel_scroll = 0;
     }
 
-    let workspace_card_areas = if app.sidebar_collapsed {
-        Vec::new()
+    let (workspace_card_areas, origin_workspace_card_areas) = if app.sidebar_collapsed {
+        (Vec::new(), Vec::new())
     } else {
-        compute_workspace_card_areas(app, sidebar_area)
+        compute_workspace_list_areas(app, sidebar_area)
     };
 
     let tab_bar_view = app
@@ -303,11 +307,25 @@ fn compute_view_internal(
             )
         })
         .unwrap_or_default();
+    let pane_title_regions = app
+        .active
+        .and_then(|ws_idx| app.workspaces.get(ws_idx))
+        .map(|workspace| {
+            pane_infos
+                .iter()
+                .filter_map(|info| {
+                    panes::pane_border_title_view(app, workspace, info)
+                        .and_then(|title| panes::pane_title_region(info, &title, area))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     app.view = crate::app::ViewState {
         layout: ViewLayout::Desktop,
         sidebar_rect: sidebar_area,
         workspace_card_areas,
+        origin_workspace_card_areas,
         tab_bar_rect,
         tab_hit_areas: tab_bar_view.tab_hit_areas,
         tab_scroll_left_hit_area: tab_bar_view.scroll_left_hit_area,
@@ -318,6 +336,7 @@ fn compute_view_internal(
         mobile_menu_hit_area: Rect::default(),
         toast_hit_area,
         pane_infos,
+        pane_title_regions,
         split_borders,
     };
     app.sync_copy_mode_search_geometry();
@@ -366,11 +385,25 @@ fn compute_mobile_view(
         .as_ref()
         .map(|_| mobile_toast_banner_rect(area, app.config_diagnostic.is_some()))
         .unwrap_or_default();
+    let pane_title_regions = app
+        .active
+        .and_then(|ws_idx| app.workspaces.get(ws_idx))
+        .map(|workspace| {
+            pane_infos
+                .iter()
+                .filter_map(|info| {
+                    panes::pane_border_title_view(app, workspace, info)
+                        .and_then(|title| panes::pane_title_region(info, &title, area))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     app.view = crate::app::ViewState {
         layout: ViewLayout::Mobile,
         sidebar_rect: Rect::default(),
         workspace_card_areas: Vec::new(),
+        origin_workspace_card_areas: Vec::new(),
         tab_bar_rect: Rect::default(),
         tab_hit_areas: Vec::new(),
         tab_scroll_left_hit_area: Rect::default(),
@@ -381,6 +414,7 @@ fn compute_mobile_view(
         mobile_menu_hit_area: header_hits.menu,
         toast_hit_area,
         pane_infos,
+        pane_title_regions,
         split_borders,
     };
     app.sync_copy_mode_search_geometry();
@@ -444,6 +478,9 @@ pub fn render_with_runtime_registry(
         }
         Mode::ContextMenu => {
             render_context_menu(app, frame);
+        }
+        Mode::PaneLayout => {
+            render_pane_layout_overlay(app, terminal_runtimes, frame, terminal_area)
         }
         Mode::Settings => render_settings_overlay(app, frame, frame.area()),
         Mode::RenameWorkspace | Mode::RenameTab | Mode::RenamePane => {

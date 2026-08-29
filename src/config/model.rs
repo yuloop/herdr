@@ -134,6 +134,73 @@ impl StatusIndicatorStyle {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CopyOnSelectModeConfig {
+    Disabled,
+    Clipboard,
+    #[default]
+    Manual,
+}
+
+impl CopyOnSelectModeConfig {
+    pub fn is_enabled(self) -> bool {
+        self != Self::Disabled
+    }
+
+    pub fn is_disabled(self) -> bool {
+        self == Self::Disabled
+    }
+}
+
+impl<'de> Deserialize<'de> for CopyOnSelectModeConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct CopyOnSelectVisitor;
+
+        impl de::Visitor<'_> for CopyOnSelectVisitor {
+            type Value = CopyOnSelectModeConfig;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter
+                    .write_str("a boolean or one of \"clipboard\", \"manual\", or \"disabled\"")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(if value {
+                    CopyOnSelectModeConfig::Clipboard
+                } else {
+                    CopyOnSelectModeConfig::Manual
+                })
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                match value.to_ascii_lowercase().as_str() {
+                    "clipboard" | "true" | "on" | "enabled" => {
+                        Ok(CopyOnSelectModeConfig::Clipboard)
+                    }
+                    "manual" | "false" | "off" => Ok(CopyOnSelectModeConfig::Manual),
+                    "disabled" | "none" => Ok(CopyOnSelectModeConfig::Disabled),
+                    _ => Err(E::unknown_variant(
+                        value,
+                        &["clipboard", "manual", "disabled"],
+                    )),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(CopyOnSelectVisitor)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HostCursorModeConfig {
@@ -261,7 +328,7 @@ pub enum ShellModeConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct TerminalConfig {
-    /// Executable used for new interactive panes. Empty means SHELL, then /bin/sh.
+    /// Executable used for new interactive panes. Empty uses the platform fallback chain.
     pub default_shell: String,
     /// Startup mode for new interactive pane shells.
     pub shell_mode: ShellModeConfig,
@@ -861,8 +928,9 @@ pub struct UiConfig {
     pub mobile_width_threshold: u16,
     /// Capture mouse input for Herdr's mouse UI. Default: true.
     pub mouse_capture: bool,
-    /// Copy text selected with the mouse. Default: true.
-    pub copy_on_select: bool,
+    /// Mouse selection behavior: clipboard, manual, or disabled. Also accepts true/false.
+    /// Default: manual.
+    pub copy_on_select: CopyOnSelectModeConfig,
     /// Host cursor policy. Default: auto.
     pub host_cursor: HostCursorModeConfig,
     /// Modifier that lets right-click gestures pass through to pane apps. Empty disables it.
@@ -910,6 +978,8 @@ pub struct UiConfig {
     /// Accent color for highlights, borders, and navigation UI.
     /// Accepts hex (#89b4fa), named colors (cyan, blue), or RGB (rgb(137,180,250)).
     pub accent: String,
+    /// UI language: "en" (default) or "zh".
+    pub language: String,
     /// Optional visual toast notifications for background workspace events.
     pub toast: ToastConfig,
     /// Play sounds when agents change state in background workspaces.
@@ -1001,7 +1071,7 @@ pub struct ExperimentalConfig {
     /// detected agent matches one of these names (case-insensitive). Empty
     /// list means apply to any focused pane. Unknown agent names are ignored;
     /// if the list contains no valid names, the reveal does not apply.
-    /// Accepted names: pi, claude, codex, gemini, cursor, devin, cline,
+    /// Accepted names: pi, claude, codex, gemini, qwen, cursor, devin, cline,
     /// opencode, copilot, kimi, kiro, droid, amp, grok, hermes, kilo,
     /// qodercli, qoder, qwen, qwen-code, maki.
     /// Default: empty.
@@ -1108,7 +1178,7 @@ impl Default for UiConfig {
             sidebar_collapsed_mode: SidebarCollapsedModeConfig::Compact,
             mobile_width_threshold: DEFAULT_MOBILE_WIDTH_THRESHOLD,
             mouse_capture: true,
-            copy_on_select: true,
+            copy_on_select: CopyOnSelectModeConfig::Manual,
             host_cursor: HostCursorModeConfig::Auto,
             right_click_passthrough_modifier: RightClickPassthroughModifierConfig::default(),
             redraw_on_focus_gained: true,
@@ -1131,6 +1201,7 @@ impl Default for UiConfig {
             status_indicators: StatusIndicatorStyle::Dots,
             sidebar: SidebarConfig::default(),
             accent: "cyan".into(),
+            language: "en".into(),
             toast: ToastConfig::default(),
             sound: SoundConfig::default(),
         }
@@ -1621,16 +1692,29 @@ mouse_capture = false
     }
 
     #[test]
-    fn copy_on_select_default_on_and_parse() {
+    fn copy_on_select_defaults_manual_and_accepts_supported_modes() {
         let default_config = Config::default();
-        assert!(default_config.ui.copy_on_select);
+        assert_eq!(
+            default_config.ui.copy_on_select,
+            CopyOnSelectModeConfig::Manual
+        );
 
-        let toml = r#"
+        for (value, expected) in [
+            ("true", CopyOnSelectModeConfig::Clipboard),
+            ("false", CopyOnSelectModeConfig::Manual),
+            ("\"clipboard\"", CopyOnSelectModeConfig::Clipboard),
+            ("\"manual\"", CopyOnSelectModeConfig::Manual),
+            ("\"disabled\"", CopyOnSelectModeConfig::Disabled),
+        ] {
+            let config: Config = toml::from_str(&format!(
+                r#"
 [ui]
-copy_on_select = false
-"#;
-        let config: Config = toml::from_str(toml).unwrap();
-        assert!(!config.ui.copy_on_select);
+copy_on_select = {value}
+"#
+            ))
+            .unwrap();
+            assert_eq!(config.ui.copy_on_select, expected, "value {value}");
+        }
     }
 
     #[test]

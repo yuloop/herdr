@@ -699,9 +699,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn copy_on_select_disabled_keeps_drag_selection_without_copying() {
+    async fn copy_on_select_manual_keeps_drag_selection_without_copying() {
         let (mut app, info) = app_with_screen_bytes(b"alpha beta");
-        app.state.copy_on_select = false;
+        app.state.copy_on_select = crate::config::CopyOnSelectModeConfig::Manual;
         let row = info.inner_rect.y;
         let start_col = info.inner_rect.x;
         let end_col = info.inner_rect.x + 4;
@@ -741,9 +741,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn copy_on_select_disabled_retains_double_clicked_word_until_shortcut() {
+    async fn copy_on_select_manual_retains_double_clicked_word_until_shortcut() {
         let (mut app, info) = app_with_screen_bytes(b"alpha beta");
-        app.state.copy_on_select = false;
+        app.state.copy_on_select = crate::config::CopyOnSelectModeConfig::Manual;
         let col = info.inner_rect.x + 2;
         let row = info.inner_rect.y;
 
@@ -773,7 +773,7 @@ mod tests {
         let stale_deadline = app
             .selection_highlight_clear_deadline
             .expect("double-click highlight deadline");
-        app.state.copy_on_select = false;
+        app.state.copy_on_select = crate::config::CopyOnSelectModeConfig::Manual;
 
         let start_col = info.inner_rect.x + 6;
         let end_col = info.inner_rect.x + 9;
@@ -1309,7 +1309,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn copy_on_select_disabled_still_forwards_mouse_reporting_gestures() {
+    async fn copy_on_select_manual_still_forwards_mouse_reporting_gestures() {
         let mut app = app_for_mouse_test();
         let mut ws = Workspace::test_new("test");
         let pane_id = ws.tabs[0].root_pane;
@@ -1329,7 +1329,7 @@ mod tests {
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;
         app.state.view.pane_infos = pane_infos;
-        app.state.copy_on_select = false;
+        app.state.copy_on_select = crate::config::CopyOnSelectModeConfig::Manual;
 
         let col = info.inner_rect.x + 2;
         let row = info.inner_rect.y + 3;

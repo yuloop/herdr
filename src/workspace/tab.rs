@@ -356,6 +356,12 @@ impl Tab {
         launch_env: &PaneLaunchEnv,
         command: Option<SplitCommand<'_>>,
     ) -> std::io::Result<NewPane> {
+        let inherited_workspace_origin = self.panes.get(&target).map(|pane| {
+            (
+                pane.origin_workspace_id.clone(),
+                pane.origin_workspace_label.clone(),
+            )
+        });
         let Some(new_id) = self
             .layout
             .split_pane(target, direction, ratio.unwrap_or(0.5))
@@ -438,7 +444,12 @@ impl Tab {
         if focus_new_pane {
             self.layout.focus_pane(new_id);
         }
-        self.panes.insert(new_id, PaneState::new(terminal_id));
+        let mut pane_state = PaneState::new(terminal_id);
+        if let Some((origin_workspace_id, origin_workspace_label)) = inherited_workspace_origin {
+            pane_state.origin_workspace_id = origin_workspace_id;
+            pane_state.origin_workspace_label = origin_workspace_label;
+        }
+        self.panes.insert(new_id, pane_state);
         self.zoomed = false;
         Ok(NewPane {
             pane_id: new_id,
@@ -502,6 +513,22 @@ impl Tab {
 
         let pane_state = self.panes.remove(&pane_id)?;
         self.zoomed = false;
+        Some(MovedPane {
+            pane_id,
+            pane_state,
+        })
+    }
+
+    pub(crate) fn restore_moved_pane(&mut self, moved: MovedPane) -> Result<(), MovedPane> {
+        if self.panes.contains_key(&moved.pane_id) {
+            return Err(moved);
+        }
+        self.panes.insert(moved.pane_id, moved.pane_state);
+        Ok(())
+    }
+
+    pub(crate) fn take_moved_pane_state(&mut self, pane_id: PaneId) -> Option<MovedPane> {
+        let pane_state = self.panes.remove(&pane_id)?;
         Some(MovedPane {
             pane_id,
             pane_state,

@@ -218,16 +218,35 @@ const QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS: [(&str, &str); 12] = [
     ("Stop", "idle"),
     ("SessionEnd", "release"),
 ];
-const CURSOR_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
+const QWEN_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
     "herdr-agent-state.ps1"
 } else {
     "herdr-agent-state.sh"
 };
-const CURSOR_HOOK_ASSET: &str = if cfg!(windows) {
-    include_str!("assets/cursor/herdr-agent-state.ps1")
+const QWEN_HOOK_ASSET: &str = if cfg!(windows) {
+    include_str!("assets/qwen/herdr-agent-state.ps1")
 } else {
-    include_str!("assets/cursor/herdr-agent-state.sh")
+    include_str!("assets/qwen/herdr-agent-state.sh")
 };
+const QWEN_INTEGRATION_VERSION: u32 = 1;
+const QWEN_HOOK_TIMEOUT_MS: u64 = 10_000;
+const QWEN_HOOK_EVENTS: [(&str, Option<&str>, &str); 13] = [
+    ("SessionStart", None, "session"),
+    ("UserPromptSubmit", None, "working"),
+    ("PreToolUse", None, "working"),
+    ("PostToolUse", None, "working"),
+    ("PostToolUseFailure", None, "working"),
+    ("PreCompact", None, "working"),
+    ("PostCompact", None, "working"),
+    ("PermissionRequest", None, "blocked"),
+    ("Notification", Some("permission_prompt"), "blocked"),
+    ("Notification", Some("idle_prompt"), "idle"),
+    ("Stop", None, "idle"),
+    ("StopFailure", None, "idle"),
+    ("SessionEnd", None, "release"),
+];
+const CURSOR_HOOK_INSTALL_NAME: &str = "herdr-agent-state.sh";
+const CURSOR_HOOK_ASSET: &str = include_str!("assets/cursor/herdr-agent-state.sh");
 const CURSOR_INTEGRATION_VERSION: u32 = 1;
 #[cfg(windows)]
 const ANTIGRAVITY_CLI_HOOK_INSTALL_NAME: &str = "herdr-agent-state.ps1";

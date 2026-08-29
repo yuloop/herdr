@@ -22,7 +22,7 @@ use std::io::IsTerminal as _;
 use std::io::{self, BufRead, Write as _};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use crossterm::event::{
@@ -96,8 +96,8 @@ struct ClientState {
     redraw_on_focus_gained: bool,
     /// Whether the next semantic frame must repaint every cell without clearing the surface.
     repaint_pending: bool,
-    /// Whether this client draws the cursor into frame cells instead of using the host cursor.
-    draw_host_cursor: bool,
+    /// Chooses between the host cursor and a cursor drawn into semantic frame cells.
+    host_cursor_policy: HostCursorPolicy,
 }
 
 #[derive(Debug, Default)]
@@ -477,13 +477,111 @@ fn write_terminal_restore_postlude(
     writer.flush()
 }
 
-fn should_draw_host_cursor(mode: crate::config::HostCursorModeConfig) -> bool {
+fn draw_host_cursor_for_mode(
+    mode: crate::config::HostCursorModeConfig,
+    platform_draw_by_default: bool,
+) -> bool {
     match mode {
-        crate::config::HostCursorModeConfig::Auto => {
-            crate::platform::should_draw_host_cursor_by_default()
-        }
+        crate::config::HostCursorModeConfig::Auto => platform_draw_by_default,
         crate::config::HostCursorModeConfig::Native => false,
         crate::config::HostCursorModeConfig::Drawn => true,
+    }
+}
+
+const AUTO_DRAW_CURSOR_MAX_FRAME_INTERVAL: Duration = Duration::from_millis(200);
+const AUTO_DRAW_CURSOR_STREAK: u8 = 3;
+
+struct HostCursorPolicy {
+    mode: crate::config::HostCursorModeConfig,
+    platform_draw_by_default: bool,
+    drawn_allowed: bool,
+    draw_host_cursor: bool,
+    last_visible_cursor: Option<protocol::CursorState>,
+    last_frame_at: Option<Instant>,
+    rapid_fixed_cursor_frames: u8,
+}
+
+impl HostCursorPolicy {
+    fn new(mode: crate::config::HostCursorModeConfig, drawn_allowed: bool) -> Self {
+        Self::new_with_platform_default(
+            mode,
+            crate::platform::should_draw_host_cursor_by_default(),
+            drawn_allowed,
+        )
+    }
+
+    fn new_with_platform_default(
+        mode: crate::config::HostCursorModeConfig,
+        platform_draw_by_default: bool,
+        drawn_allowed: bool,
+    ) -> Self {
+        Self {
+            mode,
+            platform_draw_by_default,
+            drawn_allowed,
+            draw_host_cursor: drawn_allowed
+                && draw_host_cursor_for_mode(mode, platform_draw_by_default),
+            last_visible_cursor: None,
+            last_frame_at: None,
+            rapid_fixed_cursor_frames: 0,
+        }
+    }
+
+    #[cfg(test)]
+    fn new_for_test(
+        mode: crate::config::HostCursorModeConfig,
+        platform_draw_by_default: bool,
+        drawn_allowed: bool,
+    ) -> Self {
+        Self::new_with_platform_default(mode, platform_draw_by_default, drawn_allowed)
+    }
+
+    fn observe_frame(&mut self, cursor: &Option<protocol::CursorState>, now: Instant) -> bool {
+        if self.draw_host_cursor
+            || !self.drawn_allowed
+            || self.mode != crate::config::HostCursorModeConfig::Auto
+        {
+            return self.draw_host_cursor;
+        }
+
+        let Some(cursor) = cursor.as_ref().filter(|cursor| cursor.visible) else {
+            self.reset_rapid_repaint_detection();
+            return false;
+        };
+        let is_rapid_fixed_cursor_repaint = self.last_visible_cursor.as_ref() == Some(cursor)
+            && self
+                .last_frame_at
+                .and_then(|last_frame_at| now.checked_duration_since(last_frame_at))
+                .is_some_and(|interval| interval <= AUTO_DRAW_CURSOR_MAX_FRAME_INTERVAL);
+
+        self.rapid_fixed_cursor_frames = if is_rapid_fixed_cursor_repaint {
+            self.rapid_fixed_cursor_frames.saturating_add(1)
+        } else {
+            1
+        };
+        self.last_visible_cursor = Some(cursor.clone());
+        self.last_frame_at = Some(now);
+
+        if self.rapid_fixed_cursor_frames >= AUTO_DRAW_CURSOR_STREAK {
+            self.draw_host_cursor = true;
+            self.reset_rapid_repaint_detection();
+            debug!("auto host cursor switched to drawn mode after sustained rapid frame repaints");
+        }
+
+        self.draw_host_cursor
+    }
+
+    fn reload(&mut self, mode: crate::config::HostCursorModeConfig) {
+        self.mode = mode;
+        self.draw_host_cursor =
+            self.drawn_allowed && draw_host_cursor_for_mode(mode, self.platform_draw_by_default);
+        self.reset_rapid_repaint_detection();
+    }
+
+    fn reset_rapid_repaint_detection(&mut self) {
+        self.last_visible_cursor = None;
+        self.last_frame_at = None;
+        self.rapid_fixed_cursor_frames = 0;
     }
 }
 
@@ -1222,6 +1320,9 @@ fn run_client_with_mode(
 ) -> io::Result<()> {
     init_logging();
 
+    #[cfg(windows)]
+    let _client_window_state_guard = crate::platform::restore_and_watch_client_window_state();
+
     let loaded_config = crate::config::Config::load();
     crate::terminal_modes::clear_host_mouse_reporting(&mut io::stdout())?;
     let mouse_capture = loaded_config.config.ui.mouse_capture;
@@ -1399,7 +1500,7 @@ async fn run_client_loop(
 ) -> Result<(), ClientError> {
     #[cfg(windows)]
     let _ = config.mouse_scroll_lines;
-    let draw_host_cursor = attach_escape.is_none() && should_draw_host_cursor(config.host_cursor);
+    let host_cursor_policy = HostCursorPolicy::new(config.host_cursor, attach_escape.is_none());
     let is_remote_client = is_remote_client_process();
 
     let mut state = ClientState {
@@ -1419,7 +1520,7 @@ async fn run_client_loop(
         remote_image_paste_key: config.remote_image_paste_key,
         redraw_on_focus_gained: config.redraw_on_focus_gained,
         repaint_pending: false,
-        draw_host_cursor,
+        host_cursor_policy,
     };
     debug!(?negotiated_encoding, "client render encoding active");
     let host_mouse_capture_active = Arc::new(AtomicBool::new(state.mouse_capture_active));
@@ -1690,12 +1791,15 @@ async fn run_client_loop(
             }
             ClientLoopEvent::ServerMessage(msg) => match msg {
                 ServerMessage::Frame(frame_data) => {
-                    let frame_data = if state.draw_host_cursor {
+                    let draw_host_cursor = state
+                        .host_cursor_policy
+                        .observe_frame(&frame_data.cursor, Instant::now());
+                    let frame_data = if draw_host_cursor {
                         render_ansi::frame_with_drawn_cursor(frame_data)
                     } else {
                         frame_data
                     };
-                    let encoded = if state.draw_host_cursor {
+                    let encoded = if draw_host_cursor {
                         state.blit_encoder.encode_with_suppressed_visible_cursor(
                             &frame_data,
                             state.repaint_pending,
@@ -1856,7 +1960,7 @@ async fn run_client_loop(
                     reload_local_client_config(
                         &mut state.sound_config,
                         &mut state.redraw_on_focus_gained,
-                        &mut state.draw_host_cursor,
+                        &mut state.host_cursor_policy,
                         &mut state.remote_image_paste_key,
                     );
                 }
@@ -2041,7 +2145,7 @@ fn client_remote_image_paste_key(
 fn reload_local_client_config(
     sound_config: &mut crate::config::SoundConfig,
     redraw_on_focus_gained: &mut bool,
-    draw_host_cursor: &mut bool,
+    host_cursor_policy: &mut HostCursorPolicy,
     remote_image_paste_key: &mut Option<(
         crossterm::event::KeyCode,
         crossterm::event::KeyModifiers,
@@ -2055,7 +2159,7 @@ fn reload_local_client_config(
             let loaded_remote_image_paste_key = client_remote_image_paste_key(&loaded.config);
             *sound_config = loaded.config.ui.sound;
             *redraw_on_focus_gained = loaded.config.ui.redraw_on_focus_gained;
-            *draw_host_cursor = should_draw_host_cursor(loaded.config.ui.host_cursor);
+            host_cursor_policy.reload(loaded.config.ui.host_cursor);
             *remote_image_paste_key = loaded_remote_image_paste_key;
             debug!("reloaded local client config");
         }
@@ -2769,22 +2873,90 @@ mod tests {
     #[test]
     fn host_cursor_policy_auto_uses_platform_default() {
         assert_eq!(
-            should_draw_host_cursor(crate::config::HostCursorModeConfig::Auto),
+            HostCursorPolicy::new(crate::config::HostCursorModeConfig::Auto, true).draw_host_cursor,
             crate::platform::should_draw_host_cursor_by_default()
         );
     }
 
     #[test]
     fn host_cursor_policy_native_and_drawn_override_auto_detection() {
-        let _guard = env_lock().lock().unwrap();
-        let _env = EnvVarGuard::set("TERM_PROGRAM", "WezTerm");
+        let native = HostCursorPolicy::new_for_test(
+            crate::config::HostCursorModeConfig::Native,
+            false,
+            true,
+        );
+        let drawn =
+            HostCursorPolicy::new_for_test(crate::config::HostCursorModeConfig::Drawn, false, true);
 
-        assert!(!should_draw_host_cursor(
-            crate::config::HostCursorModeConfig::Native
-        ));
-        assert!(should_draw_host_cursor(
-            crate::config::HostCursorModeConfig::Drawn
-        ));
+        assert!(!native.draw_host_cursor);
+        assert!(drawn.draw_host_cursor);
+    }
+
+    fn visible_cursor(x: u16, y: u16) -> Option<crate::protocol::CursorState> {
+        Some(crate::protocol::CursorState {
+            x,
+            y,
+            visible: true,
+            shape: 0,
+        })
+    }
+
+    #[test]
+    fn auto_host_cursor_switches_to_drawn_after_sustained_fixed_cursor_repaints() {
+        let started = std::time::Instant::now();
+        let mut policy =
+            HostCursorPolicy::new_for_test(crate::config::HostCursorModeConfig::Auto, false, true);
+
+        assert!(!policy.observe_frame(&visible_cursor(4, 2), started));
+        assert!(!policy.observe_frame(&visible_cursor(4, 2), started + Duration::from_millis(100)));
+        assert!(policy.observe_frame(&visible_cursor(4, 2), started + Duration::from_millis(200)));
+        assert!(policy.observe_frame(&visible_cursor(4, 2), started + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn auto_host_cursor_resets_rapid_repaint_detection_when_cursor_moves() {
+        let started = std::time::Instant::now();
+        let mut policy =
+            HostCursorPolicy::new_for_test(crate::config::HostCursorModeConfig::Auto, false, true);
+
+        assert!(!policy.observe_frame(&visible_cursor(4, 2), started));
+        assert!(!policy.observe_frame(&visible_cursor(4, 2), started + Duration::from_millis(100)));
+        assert!(!policy.observe_frame(&visible_cursor(5, 2), started + Duration::from_millis(200)));
+        assert!(!policy.observe_frame(&visible_cursor(5, 2), started + Duration::from_millis(300)));
+        assert!(policy.observe_frame(&visible_cursor(5, 2), started + Duration::from_millis(400)));
+    }
+
+    #[test]
+    fn explicit_native_host_cursor_never_adapts_to_drawn() {
+        let started = std::time::Instant::now();
+        let mut policy = HostCursorPolicy::new_for_test(
+            crate::config::HostCursorModeConfig::Native,
+            false,
+            true,
+        );
+
+        for offset in 0..10 {
+            assert!(!policy.observe_frame(
+                &visible_cursor(4, 2),
+                started + Duration::from_millis(offset * 50)
+            ));
+        }
+    }
+
+    #[test]
+    fn direct_attach_host_cursor_never_enables_drawn_mode() {
+        let started = std::time::Instant::now();
+        let mut policy =
+            HostCursorPolicy::new_for_test(crate::config::HostCursorModeConfig::Auto, false, false);
+
+        for offset in 0..10 {
+            assert!(!policy.observe_frame(
+                &visible_cursor(4, 2),
+                started + Duration::from_millis(offset * 50)
+            ));
+        }
+        policy.reload(crate::config::HostCursorModeConfig::Drawn);
+        assert!(!policy.observe_frame(&visible_cursor(4, 2), started + Duration::from_secs(1)));
     }
 
     #[cfg(unix)]
@@ -3464,18 +3636,22 @@ mod tests {
         let _env = EnvVarGuard::set(crate::config::CONFIG_PATH_ENV_VAR, &path_string);
         let mut sound_config = crate::config::SoundConfig::default();
         let mut redraw_on_focus_gained = true;
-        let mut draw_host_cursor = false;
+        let mut host_cursor_policy = HostCursorPolicy::new_for_test(
+            crate::config::HostCursorModeConfig::Native,
+            false,
+            true,
+        );
         let mut remote_image_paste_key = None;
 
         reload_local_client_config(
             &mut sound_config,
             &mut redraw_on_focus_gained,
-            &mut draw_host_cursor,
+            &mut host_cursor_policy,
             &mut remote_image_paste_key,
         );
 
         assert!(!redraw_on_focus_gained);
-        assert!(draw_host_cursor);
+        assert!(host_cursor_policy.observe_frame(&visible_cursor(0, 0), std::time::Instant::now()));
         let _ = std::fs::remove_file(path);
     }
 

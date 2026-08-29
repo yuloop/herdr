@@ -71,10 +71,33 @@ fn load_stored_from_path(path: &Path) -> Option<StoredReleaseNotes> {
 }
 
 pub fn load_latest() -> Option<ReleaseNotes> {
-    load_latest_from_path(&pending_path(), &crate::build_info::version())
+    load_latest_from_path_with_update_policy(
+        &pending_path(),
+        &crate::build_info::version(),
+        crate::build_info::official_updates_enabled(),
+    )
 }
 
+#[cfg(test)]
 fn load_latest_from_path(path: &Path, current_version: &str) -> Option<ReleaseNotes> {
+    load_latest_from_path_with_update_policy(path, current_version, true)
+}
+
+fn load_latest_from_path_with_update_policy(
+    path: &Path,
+    current_version: &str,
+    official_updates_enabled: bool,
+) -> Option<ReleaseNotes> {
+    if !official_updates_enabled {
+        if let Err(err) = clear_pending_at(path) {
+            tracing::warn!(
+                path = %path.display(),
+                "failed to discard official release notes for externally managed build: {err}"
+            );
+        }
+        return None;
+    }
+
     let stored = load_stored_from_path(path)?;
     release_notes_from_stored(stored, current_version)
 }
@@ -124,6 +147,10 @@ fn clear_pending_at(path: &Path) -> std::io::Result<()> {
     } else {
         Ok(())
     }
+}
+
+pub fn clear_pending() -> std::io::Result<()> {
+    clear_pending_at(&pending_path())
 }
 
 pub fn load_preview_from_local_changelog(version: &str) -> Option<ReleaseNotes> {
@@ -225,6 +252,20 @@ mod tests {
         assert!(!notes.preview);
 
         clear_pending_at(&path).unwrap();
+    }
+
+    #[test]
+    fn externally_managed_build_discards_official_release_notes() {
+        let path = std::env::temp_dir().join(format!(
+            "herdr-release-notes-{}-{}.json",
+            std::process::id(),
+            "externally-managed"
+        ));
+        let _ = clear_pending_at(&path);
+        save_pending_to_path(&path, "99.99.99", "### Changed\n- One").unwrap();
+
+        assert!(load_latest_from_path_with_update_policy(&path, "0.3.1", false).is_none());
+        assert!(!path.exists());
     }
 
     #[test]

@@ -1,8 +1,8 @@
 use crate::api::schema::{
-    EmptyParams, LayoutSetSplitRatioParams, Method, PaneFocusDirectionParams, PaneInputSetParams,
-    PaneRenameParams, PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget,
-    PaneZoomParams, TabCreateParams, TabMoveParams, TabRenameParams, TabTarget,
-    WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams,
+    EmptyParams, LayoutRearrangeParams, LayoutSetSplitRatioParams, Method,
+    PaneFocusDirectionParams, PaneMoveParams, PaneRenameParams, PaneResizeParams, PaneSplitParams,
+    PaneSwapParams, PaneTarget, PaneZoomParams, TabCreateParams, TabMoveParams, TabRenameParams,
+    TabTarget, WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams,
     WorkspaceRenameParams, WorkspaceTarget, WorktreeCreateParams, WorktreeOpenParams,
     WorktreeRemoveParams,
 };
@@ -62,18 +62,12 @@ impl App {
         self.dispatch_runtime_mutation(id, Method::WorkspaceMoveBlock(params))
     }
 
-    pub(crate) fn runtime_workspace_close_group(
+    pub(crate) fn runtime_workspace_close(
         &mut self,
         id: &'static str,
         workspace_id: String,
     ) -> String {
-        self.dispatch_runtime_mutation(
-            id,
-            Method::WorkspaceClose(WorkspaceCloseParams {
-                workspace_id,
-                close_group: true,
-            }),
-        )
+        self.dispatch_runtime_mutation(id, Method::WorkspaceClose(WorkspaceTarget { workspace_id }))
     }
 
     pub(crate) fn runtime_tab_create(
@@ -152,6 +146,10 @@ impl App {
         self.dispatch_runtime_mutation(id, Method::PaneSwap(params))
     }
 
+    pub(crate) fn runtime_pane_move(&mut self, id: &'static str, params: PaneMoveParams) -> String {
+        self.dispatch_runtime_mutation(id, Method::PaneMove(params))
+    }
+
     pub(crate) fn runtime_pane_split(
         &mut self,
         id: &'static str,
@@ -170,6 +168,14 @@ impl App {
         params: LayoutSetSplitRatioParams,
     ) -> String {
         self.dispatch_runtime_mutation(id, Method::LayoutSetSplitRatio(params))
+    }
+
+    pub(crate) fn runtime_layout_rearrange(
+        &mut self,
+        id: &'static str,
+        params: LayoutRearrangeParams,
+    ) -> String {
+        self.dispatch_runtime_mutation(id, Method::LayoutRearrange(params))
     }
 
     pub(crate) fn runtime_worktree_create_deferred(

@@ -141,19 +141,17 @@ jobs:
 
             - Linux x64 / Windows x64 双平台
           files: dist/*.tar.gz,dist/*.zip,dist/SHA256SUMS
-          make_latest: false
-          prerelease: true
           fail_on_unmatched_files: true
       - name: Delete outdated preview releases
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.YU_TOKEN }}
         run: |
           # 页面只保留最新 1 个预览条目：删掉其他 tag 含 -cn-nightly 的 release
           LATEST_TAG="${{ needs.resolve.outputs.tag }}"
-          gh api "repos/yuloop/herdr/releases?per_page=50" --jq -r '.[] | select(.prerelease==true or (.tag_name | contains("-cn-nightly"))) | .tag_name' \
+          gh api "repos/yuloop/herdr/releases?per_page=50" --jq '.[] | select(.prerelease==true or (.tag_name | contains("-cn-nightly"))) | .tag_name' \
             | while read -r t; do
                 if [ "$t" != "$LATEST_TAG" ]; then
                   echo "删除旧预览 $t"
-                  gh api -X DELETE "repos/yuloop/herdr/releases/tags/$t" || echo "!!! delete failed: $t"
+                  gh api -X DELETE "repos/yuloop/herdr/releases/tags/$t" || true
                 fi
               done

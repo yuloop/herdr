@@ -169,6 +169,25 @@ After validation, leave `C:\work\repo` clean. Remove temporary files and delete
 Rustup caches. Unless Can explicitly asks to keep the patched tree for more
 manual testing, reset `C:\work\repo` back to a clean checkout before finishing.
 
+## Local Windows Deployment
+
+This checkout's locally built Chinese Windows release is deployed to
+`D:\WSL\Program Files\herdr-windows-x86_64-zh`.
+
+When redeploying to that directory, preserve only the existing configuration.
+Replace or remove the previous binaries and other runtime files, and do not
+create a backup directory, archive, or copy of the old deployment. Resolve and
+verify the exact deployment path before removing or replacing anything.
+
+Use `F:\xiangmudata_sync\claude` as the default Windows working directory. After
+each local Windows deployment, run the packaged `install-terminal-profile.ps1`
+with that starting directory, `-SetDefault`, and `-Elevate`. The resulting
+`Herdr` Windows Terminal profile must point at the deployed executable and icon,
+remain elevated by default, set Terminal's `windowingBehavior` to
+`useAnyExisting` so new instances reuse the current window across virtual
+desktops, and be the Terminal default profile without removing other profiles.
+Use `-NoElevate` only when the user explicitly opts out of administrator rights.
+
 ## Agent Detection Updates
 
 Agent detection changes should use the manifest hot-reload loop. Use the project-local `herdr-throwaway-repro` skill to create a disposable named session and drive the real agent UI through Herdr's CLI/API into the target state. Read the pane with `herdr agent read <pane> --source detection --format text` and inspect matching with `herdr agent explain <pane> --json`. Update the bundled manifest in `src/detect/manifests/<agent>.toml`, copy that manifest to the local override path at `~/.config/herdr/agent-detection/<agent>.toml`, then run `herdr server reload-agent-manifests` against the session under test. Before writing the override, check whether one already exists; never overwrite or remove a pre-existing override without alignment. Once the rule is correct, remove the temporary override or restore the previous one exactly so the committed bundled manifest remains the source of truth.

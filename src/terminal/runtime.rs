@@ -3,11 +3,51 @@ use std::sync::Arc;
 use crate::render_signal::RenderSignal;
 
 use bytes::Bytes;
+use crossterm::event::KeyModifiers;
 use ratatui::{layout::Rect, Frame};
 use tokio::sync::{mpsc, Notify};
 
 use crate::events::AppEvent;
 use crate::layout::PaneId;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HostScrollDirection {
+    Up,
+    Down,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HostScrollAction {
+    LinesUp(usize),
+    LinesDown(usize),
+    Oldest,
+    Live,
+}
+
+pub(crate) fn host_scroll_action(
+    direction: HostScrollDirection,
+    modifiers: KeyModifiers,
+    configured_lines: usize,
+    metrics: crate::pane::ScrollMetrics,
+) -> HostScrollAction {
+    let endpoint_modifiers = KeyModifiers::CONTROL | KeyModifiers::SUPER | KeyModifiers::META;
+    if modifiers.intersects(endpoint_modifiers) {
+        return match direction {
+            HostScrollDirection::Up => HostScrollAction::Oldest,
+            HostScrollDirection::Down => HostScrollAction::Live,
+        };
+    }
+
+    let lines = if modifiers.contains(KeyModifiers::SHIFT) {
+        metrics.viewport_rows.saturating_sub(1).max(1)
+    } else {
+        configured_lines.max(1)
+    };
+    match direction {
+        HostScrollDirection::Up => HostScrollAction::LinesUp(lines),
+        HostScrollDirection::Down => HostScrollAction::LinesDown(lines),
+    }
+}
 
 /// Live runtime for a server-owned terminal.
 ///
@@ -263,6 +303,11 @@ impl TerminalRuntime {
         self.0.nudge_child_redraw_after_handoff();
     }
 
+    #[cfg(unix)]
+    pub fn take_handoff_repaint_needed(&self) -> bool {
+        self.0.take_handoff_repaint_needed()
+    }
+
     pub fn scroll_up(&self, lines: usize) {
         self.0.scroll_up(lines);
     }
@@ -281,6 +326,25 @@ impl TerminalRuntime {
 
     pub fn scroll_metrics(&self) -> Option<crate::pane::ScrollMetrics> {
         self.0.scroll_metrics()
+    }
+
+    pub(crate) fn apply_host_wheel_scroll(
+        &self,
+        direction: HostScrollDirection,
+        modifiers: KeyModifiers,
+        configured_lines: usize,
+    ) {
+        let Some(metrics) = self.scroll_metrics() else {
+            return;
+        };
+        match host_scroll_action(direction, modifiers, configured_lines, metrics) {
+            HostScrollAction::LinesUp(lines) => self.scroll_up(lines),
+            HostScrollAction::LinesDown(lines) => self.scroll_down(lines),
+            HostScrollAction::Oldest => {
+                self.set_scroll_offset_from_bottom(metrics.max_offset_from_bottom);
+            }
+            HostScrollAction::Live => self.scroll_reset(),
+        }
     }
 
     pub(crate) fn search_text_matches(
@@ -628,5 +692,55 @@ impl TerminalRuntime {
             channel_capacity,
         );
         (Self(runtime), rx)
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn test_with_handoff_repaint_needed(
+        needed: bool,
+    ) -> (Self, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        let (runtime, nudge_count) =
+            crate::pane::PaneRuntime::test_with_handoff_repaint_needed(needed);
+        (Self(runtime), nudge_count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::KeyModifiers;
+
+    use super::*;
+
+    #[test]
+    fn host_scroll_action_respects_modifier_priority() {
+        let metrics = crate::pane::ScrollMetrics {
+            offset_from_bottom: 12,
+            max_offset_from_bottom: 4255,
+            viewport_rows: 61,
+        };
+        assert_eq!(
+            host_scroll_action(HostScrollDirection::Up, KeyModifiers::empty(), 3, metrics),
+            HostScrollAction::LinesUp(3)
+        );
+        assert_eq!(
+            host_scroll_action(HostScrollDirection::Up, KeyModifiers::SHIFT, 3, metrics),
+            HostScrollAction::LinesUp(60)
+        );
+        assert_eq!(
+            host_scroll_action(
+                HostScrollDirection::Up,
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+                3,
+                metrics
+            ),
+            HostScrollAction::Oldest
+        );
+        assert_eq!(
+            host_scroll_action(HostScrollDirection::Down, KeyModifiers::SUPER, 3, metrics),
+            HostScrollAction::Live
+        );
+        assert_eq!(
+            host_scroll_action(HostScrollDirection::Up, KeyModifiers::META, 0, metrics),
+            HostScrollAction::Oldest
+        );
     }
 }

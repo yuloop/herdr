@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::{
     app::{App, InputSourceId},
@@ -8,8 +8,13 @@ use crate::{
 use super::{ConsumedInputLease, InputLeaseKey};
 
 fn is_retained_selection_copy_key(key: &TerminalKey) -> bool {
-    matches!(key.code, KeyCode::Char('c' | 'C'))
-        && matches!(key.modifiers, KeyModifiers::CONTROL | KeyModifiers::SUPER)
+    (matches!(key.code, KeyCode::Char('c' | 'C'))
+        && matches!(key.modifiers, KeyModifiers::CONTROL | KeyModifiers::SUPER))
+        || (key.modifiers.is_empty() && matches!(key.code, KeyCode::Enter | KeyCode::Char('y')))
+}
+
+fn is_retained_selection_cancel_key(key: &TerminalKey) -> bool {
+    key.modifiers.is_empty() && key.code == KeyCode::Esc
 }
 
 impl App {
@@ -32,14 +37,30 @@ impl App {
         source_id: InputSourceId,
         key: TerminalKey,
     ) -> bool {
-        if self.state.copy_on_select
-            || !is_retained_selection_copy_key(&key)
+        if self.state.copy_on_select != crate::config::CopyOnSelectModeConfig::Manual
             || !self
                 .state
                 .selection
                 .as_ref()
                 .is_some_and(crate::selection::Selection::is_visible)
         {
+            return false;
+        }
+
+        if is_retained_selection_cancel_key(&key) {
+            self.state.update_dismissed = true;
+            self.selection_autoscroll_deadline = None;
+            if key.kind != KeyEventKind::Release {
+                self.state.clear_selection();
+                self.input_leases.insert_consumed(
+                    InputLeaseKey::new(source_id, &key),
+                    ConsumedInputLease::SuppressRepeats,
+                );
+            }
+            return true;
+        }
+
+        if !is_retained_selection_copy_key(&key) {
             return false;
         }
 
@@ -131,9 +152,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn copy_on_select_disabled_ctrl_c_copies_and_clears_retained_selection() {
+    async fn copy_on_select_manual_ctrl_c_copies_and_clears_retained_selection() {
         let (mut app, info, mut input_rx) = app_with_screen_bytes_and_input(b"alpha beta");
-        app.state.copy_on_select = false;
+        app.state.copy_on_select = crate::config::CopyOnSelectModeConfig::Manual;
         drag_select_range(&mut app, &info, 0, 4);
         assert_visible_selection(&app);
         assert!(app.event_rx.try_recv().is_err());
@@ -208,9 +229,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn copy_on_select_disabled_cmd_c_copies_retained_selection() {
+    async fn copy_on_select_manual_cmd_c_copies_retained_selection() {
         let (mut app, info, mut input_rx) = app_with_screen_bytes_and_input(b"alpha beta");
-        app.state.copy_on_select = false;
+        app.state.copy_on_select = crate::config::CopyOnSelectModeConfig::Manual;
         drag_select_range(&mut app, &info, 0, 4);
 
         app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
@@ -221,78 +242,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn copy_shortcut_before_delayed_mouse_up_copies_in_progress_selection() {
+    async fn copy_on_select_defaults_manual_and_enter_and_y_copy_retained_selection() {
+        for code in [KeyCode::Enter, KeyCode::Char('y')] {
+            let (mut app, info, mut input_rx) = app_with_screen_bytes_and_input(b"alpha beta");
+            app.state.copy_on_select = crate::config::Config::default().ui.copy_on_select;
+            assert_eq!(
+                app.state.copy_on_select,
+                crate::config::CopyOnSelectModeConfig::Manual
+            );
+            drag_select_range(&mut app, &info, 0, 4);
+
+            app.handle_terminal_key_headless(TerminalKey::new(code, KeyModifiers::empty()));
+
+            assert_eq!(clipboard_write_content(&mut app), b"alpha");
+            assert!(app.state.selection.is_none());
+            assert!(input_rx.try_recv().is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn copy_on_select_manual_escape_cancels_retained_selection() {
         let (mut app, info, mut input_rx) = app_with_screen_bytes_and_input(b"alpha beta");
-        app.state.copy_on_select = false;
-        let source_id = 41;
-        let row = info.inner_rect.y;
-        let start_col = info.inner_rect.x;
-        let end_col = info.inner_rect.x + 4;
-        app.route_client_events_from(
-            source_id,
-            vec![
-                crate::raw_input::RawInputEvent::Mouse(mouse(
-                    MouseEventKind::Down(MouseButton::Left),
-                    start_col,
-                    row,
-                )),
-                crate::raw_input::RawInputEvent::Mouse(mouse(
-                    MouseEventKind::Drag(MouseButton::Left),
-                    end_col,
-                    row,
-                )),
-            ],
-            false,
-        );
+        app.state.copy_on_select = crate::config::CopyOnSelectModeConfig::Manual;
+        drag_select_range(&mut app, &info, 0, 4);
         assert_visible_selection(&app);
-        assert!(app
-            .state
-            .selection
-            .as_ref()
-            .is_some_and(crate::selection::Selection::is_in_progress));
-        assert!(app.state.selection_autoscroll.is_some());
-        assert!(app.selection_autoscroll_deadline.is_some());
 
-        let cmd_c = TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER);
-        app.route_client_events_from(
-            source_id,
-            vec![crate::raw_input::RawInputEvent::Key(cmd_c.clone())],
-            false,
-        );
+        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Esc, KeyModifiers::empty()));
 
-        assert_eq!(clipboard_write_content(&mut app), b"alpha");
+        assert!(app.state.selection.is_none());
         assert!(app.event_rx.try_recv().is_err());
-        assert!(app.state.selection.is_none());
-        assert!(app.state.selection_autoscroll.is_none());
-        assert!(app.selection_autoscroll_deadline.is_none());
-        assert!(app.selection_highlight_clear_deadline.is_none());
-        assert_eq!(app.input_leases.len(), 1);
         assert!(input_rx.try_recv().is_err());
+    }
 
-        app.route_client_events_from(
-            source_id,
-            vec![crate::raw_input::RawInputEvent::Key(
-                cmd_c.with_kind(KeyEventKind::Release),
-            )],
-            false,
-        );
-        assert!(app.input_leases.is_empty());
+    #[tokio::test]
+    async fn copy_on_select_disabled_prevents_mouse_selection() {
+        let (mut app, info, mut input_rx) = app_with_screen_bytes_and_input(b"alpha beta");
+        app.state.copy_on_select = crate::config::CopyOnSelectModeConfig::Disabled;
 
-        app.route_client_events_from(
-            source_id,
-            vec![crate::raw_input::RawInputEvent::Mouse(mouse(
-                MouseEventKind::Up(MouseButton::Left),
-                end_col,
-                row,
-            ))],
-            false,
-        );
+        drag_select_range(&mut app, &info, 0, 4);
 
         assert!(app.state.selection.is_none());
-        assert!(app.state.selection_autoscroll.is_none());
-        assert!(app.selection_autoscroll_deadline.is_none());
-        assert!(app.selection_highlight_clear_deadline.is_none());
-        assert!(app.input_leases.is_empty());
         assert!(app.event_rx.try_recv().is_err());
         assert!(input_rx.try_recv().is_err());
     }
@@ -311,7 +300,7 @@ mod tests {
         );
         assert!(selection.finish());
         app.state.selection = Some(selection);
-        app.state.copy_on_select = true;
+        app.state.copy_on_select = crate::config::CopyOnSelectModeConfig::Clipboard;
 
         app.handle_terminal_key_headless(TerminalKey::new(
             KeyCode::Char('c'),
@@ -329,7 +318,7 @@ mod tests {
     #[tokio::test]
     async fn retained_selection_copy_shortcut_forwards_when_selection_text_is_empty() {
         let (mut app, info, mut input_rx) = app_with_screen_bytes_and_input(b"");
-        app.state.copy_on_select = false;
+        app.state.copy_on_select = crate::config::CopyOnSelectModeConfig::Manual;
         drag_select_range(&mut app, &info, 0, 4);
         assert_visible_selection(&app);
 
@@ -349,7 +338,7 @@ mod tests {
     #[tokio::test]
     async fn retained_selection_copy_shortcut_requires_exact_modifiers() {
         let (mut app, info, mut input_rx) = app_with_screen_bytes_and_input(b"alpha beta");
-        app.state.copy_on_select = false;
+        app.state.copy_on_select = crate::config::CopyOnSelectModeConfig::Manual;
         drag_select_range(&mut app, &info, 0, 4);
 
         app.handle_terminal_key_headless(TerminalKey::new(

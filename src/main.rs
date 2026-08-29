@@ -7,6 +7,7 @@ use crossterm::event::{
 #[cfg(not(windows))]
 use crossterm::event::{PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
 use crossterm::execute;
+use rust_i18n::t;
 
 pub(crate) const HERDR_ENV_VAR: &str = "HERDR_ENV";
 pub(crate) const HERDR_ENV_VALUE: &str = "1";
@@ -66,7 +67,10 @@ mod detect;
 mod events;
 mod ghostty;
 mod handoff_runtime;
+mod i18n;
 mod input;
+
+rust_i18n::i18n!("locales", fallback = "en");
 mod integration;
 mod ipc;
 mod kitty_graphics;
@@ -295,10 +299,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Pane apps like lazygit and btop can still receive mouse when they request it.
 # mouse_capture = true
 
-# Automatically copy text selected with the mouse.
-# Set false to retain drag or double-click word selection until Ctrl+C,
-# or Cmd+C when the host forwards it, copies and clears it.
-# copy_on_select = true
+# Mouse selection behavior: false or "manual" (the default) retains the selection
+# for Ctrl/Cmd+C, Enter, or y to copy and Esc to cancel. Use true or "clipboard"
+# to copy immediately after selecting.
+# Use "disabled" to disable mouse text selection and copying entirely.
+# copy_on_select = "manual"
 
 # Host cursor policy: "auto", "native", or "drawn".
 # "auto" draws Herdr's own cursor on native Windows builds and WSL to avoid ConPTY cursor flicker, and uses the native terminal cursor elsewhere.
@@ -390,13 +395,16 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Custom values reported through workspace metadata use a $name token, for example $jj_status.
 # Inline token styles accept strict #RGB/#RRGGBB foregrounds plus bold and dim booleans.
 # [ui.sidebar.spaces]
-# Blank rows between space entries. Set to 1 to restore the previous spacing.
+# Additional blank rows after the separator between expanded space entries.
 # row_gap = 0
 # rows = [["state_icon", "workspace"], ["branch", "git_status"]]
 
 # Accent color for highlights, borders, and navigation UI.
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"
+
+# UI language: "en" for English (default) or "zh" for 简体中文.
+# language = "en"
 
 # Background notification popup delivery
 [ui.toast]
@@ -467,8 +475,7 @@ pane_history = false
 # matches one of these names. Empty means apply to any focused pane.
 # If the list contains no valid names, the reveal does not apply.
 # Accepted: pi, claude, codex, gemini, cursor, devin, cline, opencode,
-# copilot, kimi, kiro, droid, amp, grok, hermes, kilo, qodercli, qoder, qwen,
-# qwen-code, maki.
+# qwen, copilot, kimi, kiro, droid, amp, grok, hermes, kilo, qodercli, qoder.
 # cjk_ime_agents = []
 # Cursor shape rendered when reveal_hidden_cursor_for_cjk_ime is true.
 # Values: block, steady_block (default), underline, steady_underline, bar, steady_bar.
@@ -484,11 +491,24 @@ pane_history = false
 const SKILL: &str = include_str!("../skills/herdr/SKILL.md");
 
 fn should_block_nested(config: &config::Config) -> bool {
-    should_block_nested_for_env(config, std::env::var(HERDR_ENV_VAR).ok().as_deref())
+    let herdr_env = std::env::var(HERDR_ENV_VAR).ok();
+    #[cfg(windows)]
+    let standalone_console = crate::platform::current_process_has_standalone_console();
+    #[cfg(not(windows))]
+    let standalone_console = false;
+    should_block_nested_for_launch(config, herdr_env.as_deref(), standalone_console)
 }
 
 fn should_block_nested_for_env(config: &config::Config, herdr_env: Option<&str>) -> bool {
     !config.experimental.allow_nested && herdr_env == Some(HERDR_ENV_VALUE)
+}
+
+fn should_block_nested_for_launch(
+    config: &config::Config,
+    herdr_env: Option<&str>,
+    standalone_console: bool,
+) -> bool {
+    should_block_nested_for_env(config, herdr_env) && !standalone_console
 }
 
 fn random_nested_message() -> &'static str {
@@ -551,6 +571,9 @@ fn main() -> io::Result<()> {
         }
     };
 
+    #[cfg(windows)]
+    let windows_default_launch = args.len() == 1 && remote_launch.is_none();
+
     if remote_launch.is_some()
         && args.get(1).is_some()
         && !args.iter().any(|a| {
@@ -563,6 +586,27 @@ fn main() -> io::Result<()> {
         eprintln!("error: --remote can only be used with the default launch command");
         eprintln!("run 'herdr --help' for usage");
         std::process::exit(2);
+    }
+
+    // CLI 子命令（update/status 等）分发前先应用语言设置，确保命令输出也使用
+    // config.toml 中 ui.language 指定的 locale。
+    {
+        let early_config = config::Config::load();
+        i18n::apply_locale(&early_config.config.ui.language);
+    }
+
+    #[cfg(windows)]
+    if windows_default_launch {
+        crate::logging::init_file_logging("herdr-client.log");
+        tracing::info!(
+            event = "windows.launch.start",
+            subsystem = "launcher",
+            outcome = "started",
+            pid = std::process::id(),
+            standalone_console = crate::platform::current_process_has_standalone_console(),
+            inherited_herdr_env = std::env::var_os(HERDR_ENV_VAR).is_some(),
+            "Windows default launch starting"
+        );
     }
 
     match cli::maybe_run(&args) {
@@ -623,10 +667,9 @@ fn main() -> io::Result<()> {
     }
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        platform::begin_cli_output();
-        println!("herdr — terminal workspace manager for AI coding agents");
+        println!("herdr — {}", t!("cli.herdr_about"));
         println!();
-        println!("Usage: herdr [options]");
+        println!("{}: herdr [options]", t!("cli.root_usage_heading"));
         println!("       herdr --session <name> [options]");
         println!("       herdr --remote <ssh-target> [--session <name>]");
         println!("       herdr session attach <name>");
@@ -645,96 +688,91 @@ fn main() -> io::Result<()> {
         println!("       herdr notification <subcommand> ...");
         println!("       herdr agent <subcommand> ...");
         println!("       herdr pane <subcommand> ...");
+        println!("       herdr terminal <subcommand> ...");
         println!("       herdr session <subcommand> ...");
         println!("       herdr integration <subcommand> ...");
+        println!("       herdr plugin <subcommand> ...");
         println!();
-        println!("Common commands:");
+        println!("{}:", t!("cli.root_common_commands"));
         for (command, description) in [
-            ("herdr", "Launch or attach to the persistent session"),
-            (
-                "herdr status [server|client]",
-                "Show local client and running server status",
-            ),
-            ("herdr update", "Download and install the latest version"),
-            ("herdr completion zsh", "Generate shell completions for zsh"),
-            (
-                "herdr server stop",
-                "Stop the running server via the API socket",
-            ),
+            ("herdr", t!("cli.root_launch_about")),
+            ("herdr status [server|client]", t!("cli.status_about")),
+            ("herdr update", t!("cli.update_about")),
+            ("herdr completion zsh", t!("cli.completion_about")),
+            ("herdr server stop", t!("cli.server_stop_about")),
             (
                 "herdr channel set <stable|preview>",
-                "Choose the stable or preview update channel",
+                t!("cli.channel_set_about"),
             ),
             (
                 "herdr server reload-config",
-                "Reload config.toml in the running server",
+                t!("cli.server_reload_config_about"),
             ),
-            (
-                "herdr config reset-keys",
-                "Back up config.toml and remove custom keybindings",
-            ),
-            (
-                "herdr channel <subcommand>",
-                "Manage the stable or preview update channel",
-            ),
-            (
-                "herdr api <subcommand>",
-                "Inspect socket API metadata and live runtime state",
-            ),
-            (
-                "herdr workspace <subcommand>",
-                "Workspace helpers over the socket API",
-            ),
-            (
-                "herdr worktree <subcommand>",
-                "Git worktree helpers over the socket API",
-            ),
-            ("herdr tab <subcommand>", "Tab helpers over the socket API"),
+            ("herdr config reset-keys", t!("cli.config_reset_keys_about")),
+            ("herdr channel <subcommand>", t!("cli.channel_about")),
+            ("herdr api <subcommand>", t!("cli.api_about")),
+            ("herdr workspace <subcommand>", t!("cli.workspace_about")),
+            ("herdr worktree <subcommand>", t!("cli.worktree_about")),
+            ("herdr tab <subcommand>", t!("cli.tab_about")),
             (
                 "herdr notification <subcommand>",
-                "Notification helpers over the socket API",
+                t!("cli.notification_about"),
             ),
-            (
-                "herdr agent <subcommand>",
-                "Agent/terminal helpers over the socket API",
-            ),
-            (
-                "herdr pane <subcommand>",
-                "Pane control helpers over the socket API",
-            ),
-            (
-                "herdr session <subcommand>",
-                "Manage named persistent sessions",
-            ),
+            ("herdr agent <subcommand>", t!("cli.agent_about")),
+            ("herdr pane <subcommand>", t!("cli.pane_about")),
+            ("herdr terminal <subcommand>", t!("cli.terminal_about")),
+            ("herdr session <subcommand>", t!("cli.session_about")),
             (
                 "herdr integration <subcommand>",
-                "Manage built-in agent integrations",
+                t!("cli.integration_about"),
             ),
+            ("herdr plugin <subcommand>", t!("cli.plugin_about")),
         ] {
             println!("  {command:<32} {description}");
         }
         println!();
-        println!("Advanced commands:");
-        println!("  {:<32} Run as headless server", "herdr server");
+        println!("{}:", t!("cli.root_advanced_commands"));
+        println!("  {:<32} {}", "herdr server", t!("cli.server_about"));
         println!();
-        println!("Options:");
-        println!("  --no-session        Run monolithically (no server/client, escape hatch)");
-        println!("  --session <name>    Use or create a named persistent session");
-        println!("  --remote <target>   Attach through SSH to a remote Herdr server");
-        println!("  --remote-keybindings <local|server>");
-        println!("                      Keybindings for --remote app attach (default: local)");
-        println!("  --handoff           Opt into live handoff for update or remote attach");
-        println!("  --default-config    Print default configuration and exit");
-        println!("  --skill             Print the agent skill file and exit");
-        println!("  --version, -V       Print version and exit");
-        println!("  --help, -h          Show this help");
+        println!("{}:", t!("cli.root_options_heading"));
+        for (option, description) in [
+            ("--no-session", t!("cli.no_session_help")),
+            ("--session <name>", t!("cli.session_help")),
+            ("--remote <target>", t!("cli.remote_help")),
+            (
+                "--remote-keybindings <local|server>",
+                t!("cli.remote_keybindings_help"),
+            ),
+            ("--handoff", t!("cli.handoff_help")),
+            ("--default-config", t!("cli.default_config_help")),
+            ("--skill", t!("cli.skill_help")),
+            ("--version, -V", t!("cli.version_help")),
+            ("--help, -h", t!("cli.help_help")),
+        ] {
+            println!("  {option:<40} {description}");
+        }
         println!();
-        println!("Config: {}", config::config_path().display());
-        println!("Logs:   {}", logging::help_log_paths_summary());
-        println!("Env:    HERDR_CONFIG_PATH overrides config file path");
-        println!("Home:   https://herdr.dev");
-        println!();
-        println!("{}", cli::AGENT_HELP_FOOTER);
+        println!(
+            "{}: {}",
+            t!("cli.root_config_label"),
+            config::config_path().display()
+        );
+        println!(
+            "{}:   {}",
+            t!("cli.root_logs_label"),
+            logging::help_log_paths_summary()
+        );
+        println!(
+            "{}:    {}",
+            t!("cli.root_env_label"),
+            t!("cli.root_config_override")
+        );
+        println!("{}:   https://herdr.dev", t!("cli.root_home_label"));
+        println!(
+            "{}:  {}",
+            t!("cli.root_skill_label"),
+            t!("cli.root_skill_hint")
+        );
         return Ok(());
     }
 
@@ -811,6 +849,7 @@ fn main() -> io::Result<()> {
 
     let loaded_config = config::Config::load();
     exit_if_nested_disabled(&loaded_config.config);
+    i18n::apply_locale(&loaded_config.config.ui.language);
 
     let no_session = args.iter().any(|a| a == "--no-session");
 
@@ -819,6 +858,26 @@ fn main() -> io::Result<()> {
     if !no_session {
         if let Err(err) = server::autodetect::auto_detect_launch() {
             eprintln!("herdr: {err}");
+            #[cfg(windows)]
+            if windows_default_launch {
+                let log_path = crate::session::data_dir().join("herdr-client.log");
+                tracing::error!(
+                    event = "windows.launch.fail",
+                    subsystem = "launcher",
+                    outcome = "error",
+                    %err,
+                    path = %log_path.display(),
+                    "Windows default launch failed"
+                );
+                let title = t!("startup.windows_error_title").to_string();
+                let message = t!(
+                    "startup.windows_error_body",
+                    error = err.to_string(),
+                    log_path = log_path.display().to_string()
+                )
+                .to_string();
+                crate::platform::show_startup_error_dialog(&title, &message);
+            }
             std::process::exit(1);
         }
         return Ok(());
@@ -964,6 +1023,26 @@ mod tests {
     fn nested_herdr_does_not_block_without_env() {
         let config = config::Config::default();
         assert!(!should_block_nested_for_env(&config, None));
+    }
+
+    #[test]
+    fn inherited_nested_env_does_not_block_a_standalone_console() {
+        let config = config::Config::default();
+        assert!(!should_block_nested_for_launch(
+            &config,
+            Some(HERDR_ENV_VALUE),
+            true
+        ));
+    }
+
+    #[test]
+    fn inherited_nested_env_still_blocks_a_shared_console() {
+        let config = config::Config::default();
+        assert!(should_block_nested_for_launch(
+            &config,
+            Some(HERDR_ENV_VALUE),
+            false
+        ));
     }
 
     #[test]

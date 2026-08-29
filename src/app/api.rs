@@ -305,6 +305,26 @@ impl App {
             } else {
                 None
             };
+        let closing_workspace_origin = if let AppEvent::PaneDied { pane_id } = &ev {
+            self.find_pane(*pane_id).and_then(|(ws_idx, _)| {
+                self.state
+                    .close_pane_would_close_workspace(ws_idx, *pane_id)
+                    .then(|| {
+                        let workspace = &self.state.workspaces[ws_idx];
+                        (
+                            workspace.id.clone(),
+                            workspace
+                                .display_name_from(&self.state.terminals, &self.terminal_runtimes),
+                        )
+                    })
+            })
+        } else {
+            None
+        };
+        if let Some((workspace_id, label)) = closing_workspace_origin {
+            self.state
+                .refresh_origin_workspace_label(&workspace_id, &label);
+        }
         let terminal_cwd_reported = matches!(ev, AppEvent::TerminalCwdReported { .. });
         let previous_toast = self.state.toast.clone();
         let pane_updates = self.state.handle_app_event(ev);
@@ -1085,6 +1105,9 @@ impl App {
             Method::PaneMove(params) => return self.handle_pane_move(request.id, params),
             Method::PaneZoom(params) => return self.handle_pane_zoom(request.id, params),
             Method::PaneLayout(params) => return self.handle_pane_layout(request.id, params),
+            Method::LayoutRearrange(params) => {
+                return self.handle_layout_rearrange(request.id, params);
+            }
             Method::PaneProcessInfo(params) => {
                 return self.handle_pane_process_info(request.id, params);
             }

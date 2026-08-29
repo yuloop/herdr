@@ -55,6 +55,7 @@ use crossterm::{
 };
 use ratatui::layout::Rect;
 use ratatui::DefaultTerminal;
+use rust_i18n::t;
 use tokio::sync::{mpsc, Notify};
 use tracing::info;
 
@@ -234,6 +235,11 @@ fn auto_updates_enabled(no_session: bool) -> bool {
 
 fn background_update_check_enabled(no_session: bool, check_enabled: bool) -> bool {
     auto_updates_enabled(no_session) && check_enabled
+}
+
+fn background_version_update_check_enabled(no_session: bool, check_enabled: bool) -> bool {
+    background_update_check_enabled(no_session, check_enabled)
+        && crate::build_info::official_updates_enabled()
 }
 
 fn load_plugin_registry(no_session: bool) -> crate::app::state::InstalledPluginRegistry {
@@ -609,6 +615,7 @@ impl App {
                 layout: state::ViewLayout::Desktop,
                 sidebar_rect: Rect::default(),
                 workspace_card_areas: Vec::new(),
+                origin_workspace_card_areas: Vec::new(),
                 tab_bar_rect: Rect::default(),
                 tab_hit_areas: Vec::new(),
                 tab_scroll_left_hit_area: Rect::default(),
@@ -619,14 +626,17 @@ impl App {
                 mobile_menu_hit_area: Rect::default(),
                 toast_hit_area: Rect::default(),
                 pane_infos: Vec::new(),
+                pane_title_regions: Vec::new(),
                 split_borders: Vec::new(),
             },
             drag: None,
-            workspace_presses: HashMap::new(),
-            tab_presses: HashMap::new(),
+            workspace_press: None,
+            tab_press: None,
+            pane_title_press: None,
             selection: None,
             selection_autoscroll: None,
             context_menu: None,
+            pane_layout: None,
             update_available,
             update_install_command,
             latest_release_notes_available,
@@ -734,7 +744,7 @@ impl App {
         // and in debug/test builds so local development never mutates the
         // running binary out from under spawned test processes.
         let version_check_enabled =
-            background_update_check_enabled(no_session, config.update.version_check);
+            background_version_update_check_enabled(no_session, config.update.version_check);
         let manifest_check_enabled =
             background_update_check_enabled(no_session, config.update.manifest_check);
         if version_check_enabled {
@@ -853,7 +863,8 @@ impl App {
         app.no_session = false;
         app.state.installed_plugins = load_plugin_registry(app.no_session);
         let now = Instant::now();
-        if background_update_check_enabled(app.no_session, app.update_version_check_enabled) {
+        if background_version_update_check_enabled(app.no_session, app.update_version_check_enabled)
+        {
             app.next_auto_update_check = app
                 .state
                 .update_available
@@ -1369,7 +1380,7 @@ impl App {
         if targets.is_empty() {
             self.state
                 .integration_install_messages
-                .push("all detected integrations are current".to_string());
+                .push(t!("settings.integrations_current").to_string());
             return;
         }
 
@@ -1377,9 +1388,9 @@ impl App {
             let label = crate::integration::integration_target_label(target);
             match crate::integration::install_target(target) {
                 Ok(messages) => {
-                    self.state
-                        .integration_install_messages
-                        .push(format!("installed {label}"));
+                    self.state.integration_install_messages.push(
+                        t!("settings.integration_installed_named", label = label).to_string(),
+                    );
                     self.state
                         .integration_install_messages
                         .extend(messages.into_iter().filter(|message| {
@@ -1496,6 +1507,16 @@ impl App {
                     .clamp(self.state.sidebar_min_width, self.state.sidebar_max_width);
                 self.state.mouse_capture = config.ui.mouse_capture;
                 self.state.copy_on_select = config.ui.copy_on_select;
+                if self.state.copy_on_select.is_disabled() {
+                    if self.state.mode == Mode::Copy {
+                        self.state.stop_selection_autoscroll_state();
+                    } else {
+                        self.state.clear_selection();
+                    }
+                    self.last_pane_click = None;
+                    self.selection_autoscroll_deadline = None;
+                    self.selection_highlight_clear_deadline = None;
+                }
                 if self.state.redraw_on_focus_gained != config.ui.redraw_on_focus_gained {
                     self.state.request_client_config_reload = true;
                 }
@@ -1535,6 +1556,7 @@ impl App {
                 }
                 self.state.sound = config.ui.sound.clone();
                 self.state.toast_config = config.ui.toast.clone();
+                crate::i18n::apply_locale(&config.ui.language);
             }
         }
 
@@ -1585,7 +1607,7 @@ impl App {
             if !self.update_version_check_enabled {
                 self.next_auto_update_check = None;
             } else if !previous_version_check_enabled
-                && background_update_check_enabled(
+                && background_version_update_check_enabled(
                     self.no_session,
                     self.update_version_check_enabled,
                 )
@@ -1831,7 +1853,19 @@ impl App {
                     self.handle_text_commit_headless(text.as_str());
                 }
                 crate::raw_input::RawInputEvent::Mouse(mouse) => {
-                    if self.state.popup_pane.is_some() || self.state.mouse_capture {
+                    #[cfg(windows)]
+                    if std::env::var_os("HERDR_WINDOWS_INPUT_TRACE").is_some() {
+                        tracing::info!(
+                            kind = ?mouse.kind,
+                            column = mouse.column,
+                            row = mouse.row,
+                            mode = ?self.state.mode,
+                            mouse_capture = self.state.mouse_capture,
+                            route_to_ui = self.state.should_route_host_mouse_to_ui(),
+                            "windows input trace: server mouse route"
+                        );
+                    }
+                    if self.state.should_route_host_mouse_to_ui() {
                         self.handle_mouse_event_headless(source_id, mouse);
                     } else {
                         self.state
@@ -1941,6 +1975,9 @@ impl App {
             }
             Mode::ContextMenu => {
                 self.handle_context_menu_key_via_api(key_event);
+            }
+            Mode::PaneLayout => {
+                self.handle_pane_layout_key_via_api(key_event);
             }
             Mode::KeybindHelp => {
                 input::handle_keybind_help_key(&mut self.state, key);
@@ -2227,6 +2264,7 @@ mod tests {
             Mode::ConfirmClose,
             Mode::ConfirmRemoveWorktree,
             Mode::ContextMenu,
+            Mode::PaneLayout,
             Mode::GlobalMenu,
             Mode::KeybindHelp,
         ] {
@@ -2967,8 +3005,15 @@ mod tests {
 
         let app = test_app();
 
-        assert_eq!(app.state.update_available.as_deref(), Some("99.99.99"));
-        assert!(app.state.latest_release_notes_available);
+        let official_updates_enabled = crate::build_info::official_updates_enabled();
+        assert_eq!(
+            app.state.update_available.as_deref(),
+            official_updates_enabled.then_some("99.99.99")
+        );
+        assert_eq!(
+            app.state.latest_release_notes_available,
+            official_updates_enabled
+        );
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -2985,7 +3030,10 @@ mod tests {
         let app = test_app();
 
         assert_eq!(app.state.update_available, None);
-        assert!(app.state.latest_release_notes_available);
+        assert_eq!(
+            app.state.latest_release_notes_available,
+            crate::build_info::official_updates_enabled()
+        );
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -3009,7 +3057,10 @@ mod tests {
 
         assert_eq!(app.state.mode, Mode::Navigate);
         assert!(app.state.release_notes.is_none());
-        assert!(app.state.latest_release_notes_available);
+        assert_eq!(
+            app.state.latest_release_notes_available,
+            crate::build_info::official_updates_enabled()
+        );
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -3114,7 +3165,10 @@ mod tests {
         );
         assert_eq!(app.state.agent_panel_sort, state::AgentPanelSort::Priority);
         assert!(!app.state.redraw_on_focus_gained);
-        assert!(!app.state.copy_on_select);
+        assert_eq!(
+            app.state.copy_on_select,
+            crate::config::CopyOnSelectModeConfig::Manual
+        );
         assert!(app.state.prompt_new_workspace_name);
         assert!(app.state.selection.is_some());
         assert!(app.state.selection_autoscroll.is_some());
@@ -6485,6 +6539,65 @@ last_pane = "prefix+tab"
         );
         assert!(popup_rx.try_recv().is_ok());
         assert!(tiled_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn route_client_events_routes_settings_mouse_when_global_capture_is_disabled() {
+        let mut app = test_app();
+        app.state.view.sidebar_rect = ratatui::layout::Rect::new(0, 0, 20, 40);
+        app.state.view.terminal_area = ratatui::layout::Rect::new(20, 0, 100, 40);
+        app.state.mouse_capture = false;
+        input::open_settings_at(&mut app.state, state::SettingsSection::Theme);
+        assert!(app
+            .state
+            .should_capture_host_mouse_from(&app.terminal_runtimes));
+
+        let content = app.state.settings_content_rect();
+        let target = usize::from(app.state.settings.list.selected == 0);
+        app.route_client_events(
+            vec![crate::raw_input::RawInputEvent::Mouse(
+                crossterm::event::MouseEvent {
+                    kind: crossterm::event::MouseEventKind::Down(
+                        crossterm::event::MouseButton::Left,
+                    ),
+                    column: content.x + 1,
+                    row: content.y + target as u16,
+                    modifiers: crossterm::event::KeyModifiers::NONE,
+                },
+            )],
+            true,
+        );
+
+        assert_eq!(app.state.settings.list.selected, target);
+        assert_eq!(app.state.mode, Mode::Settings);
+    }
+
+    #[tokio::test]
+    async fn raw_input_routes_settings_mouse_when_global_capture_is_disabled() {
+        let mut app = test_app();
+        app.state.view.sidebar_rect = ratatui::layout::Rect::new(0, 0, 20, 40);
+        app.state.view.terminal_area = ratatui::layout::Rect::new(20, 0, 100, 40);
+        app.state.mouse_capture = false;
+        input::open_settings_at(&mut app.state, state::SettingsSection::Theme);
+
+        let content = app.state.settings_content_rect();
+        let target = usize::from(app.state.settings.list.selected == 0);
+        assert!(
+            app.handle_raw_input_event(crate::raw_input::RawInputEvent::Mouse(
+                crossterm::event::MouseEvent {
+                    kind: crossterm::event::MouseEventKind::Down(
+                        crossterm::event::MouseButton::Left,
+                    ),
+                    column: content.x + 1,
+                    row: content.y + target as u16,
+                    modifiers: crossterm::event::KeyModifiers::NONE,
+                },
+            ))
+            .await
+        );
+
+        assert_eq!(app.state.settings.list.selected, target);
+        assert_eq!(app.state.mode, Mode::Settings);
     }
 
     #[test]

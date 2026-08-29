@@ -107,6 +107,10 @@ pub struct PaneSnapshot {
     pub agent_session: Option<PaneAgentSessionSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_argv: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_workspace_label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -359,6 +363,16 @@ fn capture_tab(
                     value: session.session_ref.value.clone(),
                 })
         });
+        let (origin_workspace_id, origin_workspace_label) = tab
+            .panes
+            .get(id)
+            .map(|pane| {
+                (
+                    pane.origin_workspace_id.clone(),
+                    pane.origin_workspace_label.clone(),
+                )
+            })
+            .unwrap_or_default();
         panes.insert(
             id.raw(),
             PaneSnapshot {
@@ -368,6 +382,8 @@ fn capture_tab(
                 managed_agent_kind,
                 agent_session,
                 launch_argv,
+                origin_workspace_id,
+                origin_workspace_label,
             },
         );
     }
@@ -648,6 +664,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                origin_workspace_id: Some("w-origin".into()),
+                origin_workspace_label: Some("origin".into()),
             },
         );
         panes.insert(
@@ -659,6 +677,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                origin_workspace_id: None,
+                origin_workspace_label: None,
             },
         );
 
@@ -713,6 +733,18 @@ mod tests {
         assert_eq!(
             restored.workspaces[0].tabs[0].panes[&1].label.as_deref(),
             Some("website")
+        );
+        assert_eq!(
+            restored.workspaces[0].tabs[0].panes[&0]
+                .origin_workspace_id
+                .as_deref(),
+            Some("w-origin")
+        );
+        assert_eq!(
+            restored.workspaces[0].tabs[0].panes[&0]
+                .origin_workspace_label
+                .as_deref(),
+            Some("origin")
         );
         assert_eq!(restored.sidebar_width, Some(26));
         assert_eq!(restored.sidebar_section_split, Some(0.5));
@@ -1207,6 +1239,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                origin_workspace_id: None,
+                origin_workspace_label: None,
             },
         );
         panes.insert(
@@ -1220,6 +1254,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                origin_workspace_id: None,
+                origin_workspace_label: None,
             },
         );
 

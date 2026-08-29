@@ -137,6 +137,8 @@ pub enum Method {
     PaneZoom(PaneZoomParams),
     #[serde(rename = "pane.layout")]
     PaneLayout(PaneLayoutParams),
+    #[serde(rename = "layout.rearrange")]
+    LayoutRearrange(LayoutRearrangeParams),
     #[serde(rename = "pane.process_info")]
     PaneProcessInfo(PaneProcessInfoParams),
     #[serde(rename = "layout.export")]

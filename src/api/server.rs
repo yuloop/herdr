@@ -428,6 +428,7 @@ fn api_method_name(method: &Method) -> &'static str {
         Method::PaneMove(_) => "pane.move",
         Method::PaneZoom(_) => "pane.zoom",
         Method::PaneLayout(_) => "pane.layout",
+        Method::LayoutRearrange(_) => "layout.rearrange",
         Method::PaneProcessInfo(_) => "pane.process_info",
         Method::LayoutExport(_) => "layout.export",
         Method::LayoutApply(_) => "layout.apply",

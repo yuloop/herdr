@@ -28,6 +28,13 @@ const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// Timeout for checking the stable JSON API before attaching to the binary protocol socket.
 const STATUS_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Explorer launches should tolerate a named-pipe status request that races
+/// with another short-lived API connection.
+#[cfg(windows)]
+const WINDOWS_STATUS_ATTEMPTS: usize = 3;
+#[cfg(windows)]
+const WINDOWS_STATUS_RETRY_DELAY: Duration = Duration::from_millis(100);
+
 /// Private daemon-start hint used to seed a fresh headless server from the
 /// directory where the user ran `herdr`.
 pub(crate) const STARTUP_CWD_ENV_VAR: &str = "HERDR_STARTUP_CWD";
@@ -96,6 +103,25 @@ fn read_server_status() -> io::Result<Option<crate::api::RuntimeStatus>> {
 }
 
 #[cfg(windows)]
+fn read_server_status_with_retry() -> io::Result<Option<crate::api::RuntimeStatus>> {
+    for attempt in 1..=WINDOWS_STATUS_ATTEMPTS {
+        match read_server_status() {
+            Ok(Some(status)) => return Ok(Some(status)),
+            Ok(None) if attempt == WINDOWS_STATUS_ATTEMPTS => return Ok(None),
+            Ok(None) => {
+                tracing::debug!(attempt, "Windows server status unavailable; retrying");
+            }
+            Err(err) if attempt == WINDOWS_STATUS_ATTEMPTS => return Err(err),
+            Err(err) => {
+                tracing::warn!(attempt, %err, "Windows server status request failed; retrying");
+            }
+        }
+        std::thread::sleep(WINDOWS_STATUS_RETRY_DELAY);
+    }
+    Ok(None)
+}
+
+#[cfg(windows)]
 fn client_protocol_accepts_hello(socket_path: &Path) -> io::Result<bool> {
     if !socket_path.exists() {
         return Ok(false);
@@ -147,6 +173,7 @@ fn client_protocol_accepts_hello(socket_path: &Path) -> io::Result<bool> {
     }
 }
 
+#[cfg(not(windows))]
 fn validate_running_server_compatibility() -> io::Result<()> {
     let Some(status) = read_server_status()? else {
         return Err(io::Error::other(format!(
@@ -155,6 +182,10 @@ fn validate_running_server_compatibility() -> io::Result<()> {
         )));
     };
 
+    validate_server_status_compatibility(&status)
+}
+
+fn validate_server_status_compatibility(status: &crate::api::RuntimeStatus) -> io::Result<()> {
     if status.protocol == Some(crate::protocol::PROTOCOL_VERSION) {
         return Ok(());
     }
@@ -291,7 +322,21 @@ pub fn auto_detect_launch() -> io::Result<()> {
     let socket_path = client_socket_path();
     info!(path = %socket_path.display(), "auto-detect launch starting");
 
-    if is_server_listening_at(&socket_path) {
+    #[cfg(windows)]
+    let running_status = read_server_status_with_retry()?;
+    #[cfg(windows)]
+    let server_running = running_status.is_some();
+    #[cfg(not(windows))]
+    let server_running = is_server_listening_at(&socket_path);
+
+    if server_running {
+        #[cfg(windows)]
+        if let Some(status) = running_status.as_ref() {
+            // Reuse the successful status response instead of issuing a second
+            // API request that can fail transiently before client logging starts.
+            validate_server_status_compatibility(status)?;
+        }
+        #[cfg(not(windows))]
         validate_running_server_compatibility()?;
         info!("server already running, attaching as client");
     } else {

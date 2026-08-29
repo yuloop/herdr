@@ -62,31 +62,45 @@ fn request_uses_dot_method_names() {
 }
 
 #[test]
-fn workspace_close_group_intent_defaults_false_and_round_trips() {
-    let request: Request = serde_json::from_value(serde_json::json!({
-        "id": "close",
-        "method": "workspace.close",
-        "params": { "workspace_id": "w1" }
-    }))
-    .unwrap();
-    assert!(matches!(
-        request.method,
-        Method::WorkspaceClose(WorkspaceCloseParams {
-            close_group: false,
-            ..
-        })
-    ));
-
-    let explicit = Request {
-        id: "close-group".into(),
-        method: Method::WorkspaceClose(WorkspaceCloseParams {
-            workspace_id: "w1".into(),
-            close_group: true,
+fn layout_rearrange_request_round_trips_tagged_operations() {
+    let reposition = Request {
+        id: "reposition".into(),
+        method: Method::LayoutRearrange(LayoutRearrangeParams {
+            operation: LayoutRearrangeOperation::Reposition {
+                source_pane_id: "w1:p2".into(),
+                target_pane_id: "w1:p1".into(),
+                placement: PaneDirection::Left,
+                ratio: Some(0.5),
+            },
+            focus: true,
         }),
     };
-    let json = serde_json::to_value(&explicit).unwrap();
-    assert_eq!(json["params"]["close_group"], true);
-    assert_eq!(serde_json::from_value::<Request>(json).unwrap(), explicit);
+    let reposition_json = serde_json::to_value(&reposition).unwrap();
+    assert_eq!(reposition_json["method"], "layout.rearrange");
+    assert_eq!(reposition_json["params"]["operation"]["type"], "reposition");
+    assert_eq!(reposition_json["params"]["operation"]["placement"], "left");
+    assert_eq!(
+        serde_json::from_value::<Request>(reposition_json).unwrap(),
+        reposition
+    );
+
+    let preset = Request {
+        id: "preset".into(),
+        method: Method::LayoutRearrange(LayoutRearrangeParams {
+            operation: LayoutRearrangeOperation::Preset {
+                anchor_pane_id: "w1:p2".into(),
+                preset: PaneLayoutPreset::MainTop,
+            },
+            focus: false,
+        }),
+    };
+    let preset_json = serde_json::to_value(&preset).unwrap();
+    assert_eq!(preset_json["params"]["operation"]["type"], "preset");
+    assert_eq!(preset_json["params"]["operation"]["preset"], "main_top");
+    assert_eq!(
+        serde_json::from_value::<Request>(preset_json).unwrap(),
+        preset
+    );
 }
 
 #[test]
@@ -720,12 +734,10 @@ fn worktree_request_and_response_round_trip() {
             branch: Some("worktree/api".into()),
             base: Some("HEAD".into()),
             focus: true,
-            trust_repository: true,
             ..WorktreeCreateParams::default()
         }),
     };
     let json = serde_json::to_string(&request).unwrap();
-    assert!(json.contains("\"trust_repository\":true"));
     let restored: Request = serde_json::from_str(&json).unwrap();
     assert_eq!(restored, request);
 

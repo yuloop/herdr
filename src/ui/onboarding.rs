@@ -5,6 +5,7 @@ use ratatui::{
     widgets::Paragraph,
     Frame,
 };
+use rust_i18n::t;
 
 use super::widgets::{
     action_button_width, modal_stack_areas, panel_contrast_fg, render_action_button,
@@ -23,7 +24,7 @@ pub(crate) fn onboarding_welcome_continue_rect(area: Rect) -> Rect {
     Rect::new(
         area.x,
         area.y,
-        action_button_width(Some("↵"), "continue"),
+        action_button_width(Some("↵"), &t!("onboarding.continue_btn")),
         1,
     )
 }
@@ -48,7 +49,7 @@ fn render_onboarding_welcome(app: &AppState, frame: &mut Frame, area: Rect) {
     .areas::<4>(stack.content);
 
     frame.render_widget(
-        Paragraph::new("  herdr").style(
+        Paragraph::new(t!("onboarding.brand").to_string()).style(
             Style::default()
                 .fg(app.palette.text)
                 .add_modifier(Modifier::BOLD),
@@ -56,16 +57,14 @@ fn render_onboarding_welcome(app: &AppState, frame: &mut Frame, area: Rect) {
         header_rows[0],
     );
     frame.render_widget(
-        Paragraph::new("  terminal workspace manager for coding agents")
+        Paragraph::new(t!("onboarding.subtitle").to_string())
             .style(Style::default().fg(app.palette.overlay0)),
         header_rows[1],
     );
 
     frame.render_widget(
-        Paragraph::new(
-            "  this is a mouse-first terminal.\n  click the sidebar to switch workspaces, drag pane\n  borders to resize, right-click for context menus.",
-        )
-        .style(Style::default().fg(app.palette.overlay1)),
+        Paragraph::new(t!("onboarding.body").to_string())
+            .style(Style::default().fg(app.palette.overlay1)),
         content_rows[0],
     );
 
@@ -78,7 +77,7 @@ fn render_onboarding_welcome(app: &AppState, frame: &mut Frame, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            " enters prefix mode · ",
+            t!("onboarding.prefix_hint").to_string(),
             Style::default().fg(app.palette.overlay1),
         ),
         Span::styled(
@@ -88,14 +87,14 @@ fn render_onboarding_welcome(app: &AppState, frame: &mut Frame, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            " shows keybinds and settings",
+            t!("onboarding.keybind_hint").to_string(),
             Style::default().fg(app.palette.overlay1),
         ),
     ]);
     frame.render_widget(Paragraph::new(key_line), content_rows[2]);
 
     frame.render_widget(
-        Paragraph::new("  next: install optional agent integrations for more reliable state")
+        Paragraph::new(t!("onboarding.next").to_string())
             .style(Style::default().fg(app.palette.overlay1)),
         content_rows[3],
     );
@@ -105,7 +104,7 @@ fn render_onboarding_welcome(app: &AppState, frame: &mut Frame, area: Rect) {
         frame,
         continue_rect,
         Some("↵"),
-        "continue",
+        &t!("onboarding.continue_btn"),
         Style::default()
             .fg(panel_contrast_fg(&app.palette))
             .bg(app.palette.accent)

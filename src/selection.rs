@@ -7,6 +7,9 @@
 //!   MouseUp           → Selection finalized; optionally copied by the caller
 //!   Next click / key  → A retained selection is cleared
 //!
+//! In `ui.copy_on_select = "manual"` mode, Ctrl/Cmd+C, Enter, or y copies a
+//! retained selection and Esc clears it. `"disabled"` turns selection off.
+//!
 //! Double-click selects a word; the caller decides whether to copy it immediately.
 //!
 //! Rows are stored in screen-buffer coordinates instead of viewport-relative

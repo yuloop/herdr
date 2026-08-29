@@ -7,11 +7,10 @@ use ratatui::{
 };
 
 use super::scrollbar::{render_pane_scrollbar, should_show_scrollbar};
-#[cfg(test)]
 use super::text::display_width;
 use super::text::truncate_end;
 use super::widgets::panel_contrast_fg;
-use crate::app::state::Palette;
+use crate::app::state::{Palette, PaneTitleRegion};
 use crate::app::{AppState, Mode};
 use crate::layout::PaneInfo;
 use crate::popup_size::resolve_popup_geometry;
@@ -31,10 +30,54 @@ fn pane_border_title(label: &str, pane_width: u16, _focused: bool) -> Option<Str
     Some(format!(" {} ", truncate_end(label, max_label_width)))
 }
 
-// Full view computation reaches this helper for active and background panes.
-// Keep terminal queries narrow, allocation-free, and short under the core lock.
-fn terminal_inner_rect(rt: &TerminalRuntime, pane_inner: Rect, pane_scrollbars: bool) -> Rect {
-    if !pane_scrollbars || pane_inner.width <= 4 || rt.alternate_screen_active() {
+pub(crate) fn pane_border_title_view(
+    app: &AppState,
+    ws: &crate::workspace::Workspace,
+    info: &PaneInfo,
+) -> Option<String> {
+    ws.pane_state(info.id)
+        .and_then(|pane| app.terminals.get(&pane.attached_terminal_id))
+        .and_then(|terminal| terminal.border_label(app.show_agent_labels_on_pane_borders))
+        .and_then(|label| pane_border_title(&label, info.rect.width, info.is_focused))
+}
+
+pub(crate) fn pane_title_region(
+    info: &PaneInfo,
+    rendered_title: &str,
+    frame_area: Rect,
+) -> Option<PaneTitleRegion> {
+    if !info.borders.contains(Borders::TOP)
+        || rendered_title.trim().is_empty()
+        || info.rect.width <= 4
+        || info.rect.y < frame_area.y
+        || info.rect.y >= frame_area.y.saturating_add(frame_area.height)
+    {
+        return None;
+    }
+    let title_start = info.rect.x.saturating_add(1);
+    let title_end = title_start
+        .saturating_add(display_width(rendered_title).min(u16::MAX as usize) as u16)
+        .min(
+            info.rect
+                .x
+                .saturating_add(info.rect.width)
+                .saturating_sub(1),
+        );
+    let visible_start = title_start.max(frame_area.x);
+    let visible_end = title_end.min(frame_area.x.saturating_add(frame_area.width));
+    (visible_start < visible_end).then_some(PaneTitleRegion {
+        pane_id: info.id,
+        rect: Rect::new(
+            visible_start,
+            info.rect.y,
+            visible_end.saturating_sub(visible_start),
+            1,
+        ),
+    })
+}
+
+fn stable_terminal_inner_rect(pane_inner: Rect, pane_scrollbars: bool) -> Rect {
+    if !pane_scrollbars || pane_inner.width <= 4 {
         return pane_inner;
     }
 
@@ -662,12 +705,7 @@ fn render_pane_border_titles(
         if !info.borders.contains(Borders::TOP) || info.rect.width <= 4 {
             continue;
         }
-        let Some(title) = ws
-            .pane_state(info.id)
-            .and_then(|pane| app.terminals.get(&pane.attached_terminal_id))
-            .and_then(|terminal| terminal.border_label(app.show_agent_labels_on_pane_borders))
-            .and_then(|label| pane_border_title(&label, info.rect.width, info.is_focused))
-        else {
+        let Some(title) = pane_border_title_view(app, ws, info) else {
             continue;
         };
         let y = info.rect.y;
@@ -1039,6 +1077,34 @@ mod tests {
             Some(" abc… ")
         );
         assert_eq!(pane_border_title("abcdef", 4, false), None);
+    }
+
+    #[test]
+    fn title_hit_region_matches_rendered_cells_and_requires_visible_title() {
+        let info = PaneInfo {
+            id: PaneId::from_raw(7),
+            rect: Rect::new(10, 4, 30, 8),
+            inner_rect: Rect::new(11, 5, 28, 6),
+            scrollbar_rect: None,
+            borders: Borders::ALL,
+            is_focused: true,
+        };
+        assert_eq!(
+            pane_title_region(&info, " qwen ", Rect::new(0, 0, 100, 24)),
+            Some(crate::app::state::PaneTitleRegion {
+                pane_id: info.id,
+                rect: Rect::new(11, 4, 6, 1),
+            })
+        );
+        let no_top = PaneInfo {
+            borders: Borders::LEFT | Borders::RIGHT | Borders::BOTTOM,
+            ..info.clone()
+        };
+        assert_eq!(
+            pane_title_region(&no_top, " qwen ", Rect::new(0, 0, 100, 24)),
+            None
+        );
+        assert_eq!(pane_title_region(&info, "", Rect::new(0, 0, 100, 24)), None);
     }
 
     #[test]

@@ -167,7 +167,6 @@ export async function checkVersions() {
     if (!['website/src/content/docs', 'docs/next/website/src/content/docs'].includes(entry.source)) {
       throw new Error(`docs version ${entry.version} has unsupported source ${entry.source}`);
     }
-
     const versionRoot = resolve(versionsDir, entry.version, 'website');
     const documentationPaths = await listDocumentationPaths(
       resolve(versionRoot, 'src/content/docs'),

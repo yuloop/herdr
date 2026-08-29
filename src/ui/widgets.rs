@@ -8,6 +8,8 @@ use ratatui::{
 
 use crate::app::state::Palette;
 
+use super::text::display_width_u16;
+
 pub(super) fn render_panel_shell(
     frame: &mut Frame,
     area: Rect,
@@ -140,7 +142,7 @@ pub(crate) fn action_button_text(hint: Option<&str>, label: &str) -> String {
 }
 
 pub(crate) fn action_button_width(hint: Option<&str>, label: &str) -> u16 {
-    action_button_text(hint, label).chars().count() as u16
+    display_width_u16(&action_button_text(hint, label))
 }
 
 pub(crate) struct ActionButtonSpec<'a> {
@@ -275,4 +277,15 @@ pub(super) fn centered_button_row(
             rect
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_button_width_uses_terminal_display_cells() {
+        assert_eq!(action_button_width(Some("esc"), "关闭"), 10);
+        assert_eq!(action_button_width(Some("↵"), "应用"), 8);
+    }
 }

@@ -2116,6 +2116,7 @@
             "opencode",
             "kilo",
             "hermes",
+            "qwen",
             "qodercli",
             "qwen",
             "cursor",
@@ -2263,6 +2264,76 @@
               "type": "object"
             }
           ]
+        },
+        "LayoutRearrangeOperation": {
+          "oneOf": [
+            {
+              "properties": {
+                "placement": {
+                  "$ref": "#/schemas/request/$defs/PaneDirection"
+                },
+                "ratio": {
+                  "format": "float",
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "source_pane_id": {
+                  "type": "string"
+                },
+                "target_pane_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "reposition",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "source_pane_id",
+                "target_pane_id",
+                "placement"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "anchor_pane_id": {
+                  "type": "string"
+                },
+                "preset": {
+                  "$ref": "#/schemas/request/$defs/PaneLayoutPreset"
+                },
+                "type": {
+                  "const": "preset",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "anchor_pane_id",
+                "preset"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "LayoutRearrangeParams": {
+          "properties": {
+            "focus": {
+              "default": false,
+              "type": "boolean"
+            },
+            "operation": {
+              "$ref": "#/schemas/request/$defs/LayoutRearrangeOperation"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "type": "object"
         },
         "LayoutSetSplitRatioParams": {
           "properties": {
@@ -2580,6 +2651,16 @@
             }
           },
           "type": "object"
+        },
+        "PaneLayoutPreset": {
+          "enum": [
+            "columns",
+            "rows",
+            "grid",
+            "main_left",
+            "main_top"
+          ],
+          "type": "string"
         },
         "PaneListParams": {
           "properties": {
@@ -5208,6 +5289,22 @@
         {
           "properties": {
             "method": {
+              "const": "layout.rearrange",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/LayoutRearrangeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "pane.process_info",
               "type": "string"
             },
@@ -7198,6 +7295,7 @@
             "opencode",
             "kilo",
             "hermes",
+            "qwen",
             "qodercli",
             "qwen",
             "cursor",
@@ -7325,6 +7423,55 @@
               "type": "object"
             }
           ]
+        },
+        "LayoutRearrangeReason": {
+          "enum": [
+            "same_pane",
+            "cross_tab",
+            "zoomed_tab",
+            "single_pane",
+            "unchanged"
+          ],
+          "type": "string"
+        },
+        "LayoutRearrangeResult": {
+          "properties": {
+            "anchor_pane_id": {
+              "type": "string"
+            },
+            "changed": {
+              "type": "boolean"
+            },
+            "focused_pane_id": {
+              "type": "string"
+            },
+            "layout": {
+              "$ref": "#/schemas/success_response/$defs/PaneLayoutSnapshot"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/LayoutRearrangeReason"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target_pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "changed",
+            "anchor_pane_id",
+            "focused_pane_id",
+            "layout"
+          ],
+          "type": "object"
         },
         "NotificationShowReason": {
           "enum": [
@@ -9133,6 +9280,22 @@
               "required": [
                 "type",
                 "layout"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "rearrange": {
+                  "$ref": "#/schemas/success_response/$defs/LayoutRearrangeResult"
+                },
+                "type": {
+                  "const": "layout_rearrange",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "rearrange"
               ],
               "type": "object"
             },

@@ -848,6 +848,18 @@ impl WindowsInputMapper {
         };
         self.mouse_buttons = buttons;
 
+        if windows_input_trace_enabled() {
+            tracing::info!(
+                x = mouse.x,
+                y = mouse.y,
+                button_state = mouse.button_state,
+                control_key_state = mouse.control_key_state,
+                event_flags = mouse.event_flags,
+                kind = ?kind,
+                "windows input trace: console mouse record"
+            );
+        }
+
         Some(crate::protocol::ClientInputEvent::Mouse {
             kind: crate::protocol::ClientMouseKind::from_crossterm(kind)?,
             column: mouse.x,

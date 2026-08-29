@@ -301,6 +301,27 @@ fn all_bundled_manifests_parse_and_validate() {
 }
 
 #[test]
+fn qwen_manifest_detects_blocked_working_and_idle_fallback() {
+    let blocked = explain(
+        Agent::Qwen,
+        "│ Do you want to proceed?\n│ 1. Allow once\n│ 2. No, cancel",
+    );
+    assert_eq!(blocked.state, AgentState::Blocked);
+    assert!(blocked.visible_blocker);
+
+    let working = explain(Agent::Qwen, "Generating implementation… (esc to cancel)");
+    assert_eq!(working.state, AgentState::Working);
+    assert!(working.visible_working);
+
+    let idle = explain(Agent::Qwen, "> Enter a prompt or @path/to/file");
+    assert_eq!(idle.state, AgentState::Idle);
+    assert_eq!(
+        idle.fallback_reason.as_deref(),
+        Some(DEFAULT_KNOWN_AGENT_IDLE_FALLBACK)
+    );
+}
+
+#[test]
 fn devin_manifest_detects_idle_working_and_blocked_states() {
     let idle = explain(
         Agent::Devin,

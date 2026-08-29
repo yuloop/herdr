@@ -142,6 +142,7 @@ jobs:
             - Linux x64 / Windows x64 双平台
           files: dist/*.tar.gz,dist/*.zip,dist/SHA256SUMS
           make_latest: false
+          prerelease: true
           fail_on_unmatched_files: true
       - name: Delete outdated preview releases
         env:

@@ -1201,7 +1201,7 @@ impl Default for UiConfig {
             status_indicators: StatusIndicatorStyle::Dots,
             sidebar: SidebarConfig::default(),
             accent: "cyan".into(),
-            language: "en".into(),
+            language: "zh".into(),
             toast: ToastConfig::default(),
             sound: SoundConfig::default(),
         }

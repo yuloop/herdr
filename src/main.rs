@@ -403,8 +403,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"
 
-# UI language: "en" for English (default) or "zh" for 简体中文.
-# language = "en"
+# UI language: "zh" for 简体中文 (default) or "en" for English.
+# language = "zh"
 
 # Background notification popup delivery
 [ui.toast]

@@ -3043,12 +3043,12 @@ impl PaneRuntime {
                 .or_else(|| crate::platform::foreground_process_group_id(pid));
             let leader_cwd = foreground_pgid.and_then(absolute_process_cwd);
 
-            if leader_cwd.as_ref() == shell_cwd.as_ref() {
-                foreground_member_cwd_different_from_shell(pid, shell_cwd.as_ref()).or(leader_cwd)
-            } else {
-                leader_cwd
-                    .or_else(|| foreground_member_cwd_different_from_shell(pid, shell_cwd.as_ref()))
-            }
+            // The group leader's cwd is authoritative (issue #3270): a helper
+            // process that chdirs elsewhere inside the same foreground group
+            // must not override it. Scan other members only when the leader's
+            // cwd cannot be read at all.
+            leader_cwd
+                .or_else(|| foreground_member_cwd_different_from_shell(pid, shell_cwd.as_ref()))
         }
 
         #[cfg(not(unix))]

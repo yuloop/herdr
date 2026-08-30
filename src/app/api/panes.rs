@@ -1,6 +1,6 @@
 use bytes::Bytes;
 
-use crate::api::schema::{
+use crate::api::schema::{PaneInputSetParams,
     EventData, EventEnvelope, EventKind, LayoutRearrangeOperation, LayoutRearrangeParams,
     LayoutRearrangeReason, LayoutRearrangeResult, PaneClearAgentAuthorityParams, PaneCurrentParams,
     PaneDirection, PaneEdgesParams, PaneEdgesResult, PaneFocusDirectionParams,

@@ -1262,7 +1262,7 @@ mod tests {
             app.state.workspaces[0].tabs[0].layout.focused(),
             source_pane
         );
-        assert!(app.state.workspace_press.is_none());
+        assert!(app.state.workspace_presses.is_empty());
 
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Right),

@@ -76,6 +76,20 @@ pub(crate) fn pane_title_region(
     })
 }
 
+fn terminal_inner_rect(rt: &TerminalRuntime, pane_inner: Rect, pane_scrollbars: bool) -> Rect {
+    if !pane_scrollbars || pane_inner.width <= 4 || rt.alternate_screen_active() {
+        return pane_inner;
+    }
+
+    Rect::new(
+        pane_inner.x,
+        pane_inner.y,
+        pane_inner.width.saturating_sub(1),
+        pane_inner.height,
+    )
+}
+
+
 fn stable_terminal_inner_rect(pane_inner: Rect, pane_scrollbars: bool) -> Rect {
     if !pane_scrollbars || pane_inner.width <= 4 {
         return pane_inner;

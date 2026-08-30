@@ -1163,7 +1163,7 @@ impl App {
     pub(super) fn confirm_close_accept_via_api(&mut self) {
         let ws_idx = self.state.selected;
         if ws_idx < self.state.workspaces.len() {
-            self.close_workspace_idx_via_api(ws_idx);
+            self.close_workspace_idx_with_group_via_api(ws_idx);
         }
         self.state.mode = if self.state.active.is_some() {
             Mode::Terminal
@@ -1302,7 +1302,7 @@ impl App {
                 if self.state.confirm_close {
                     open_confirm_close(&mut self.state);
                 } else {
-                    self.close_workspace_idx_via_api(ws_idx);
+                    self.close_workspace_idx_with_group_via_api(ws_idx);
                     self.state.mode = Mode::Navigate;
                 }
             }
@@ -1343,27 +1343,7 @@ impl App {
                 }
                 self.state.mode = Mode::Terminal;
             }
-            (
-                ContextMenuKind::Pane {
-                    ws_idx, pane_id, ..
-                },
-                Some(action @ ("Send right-clicks to pane" | "Use Herdr right-click menu")),
-            ) => {
-                if let Some(pane_id) = self.public_pane_id(ws_idx, pane_id) {
-                    self.runtime_pane_input_set(
-                        "tui.pane.input.set",
-                        crate::api::schema::PaneInputSetParams {
-                            pane_id,
-                            right_click: if action == "Send right-clicks to pane" {
-                                crate::api::schema::PaneRightClickTarget::Pane
-                            } else {
-                                crate::api::schema::PaneRightClickTarget::Herdr
-                            },
-                        },
-                    );
-                }
-                self.state.mode = Mode::Terminal;
-            }
+
             (
                 ContextMenuKind::Pane {
                     ws_idx,

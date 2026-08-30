@@ -8,6 +8,7 @@ use super::claude_settings::{
     install as install_claude_settings, uninstall as uninstall_claude_settings,
 };
 use super::command::hook_command;
+use super::{OPENCODE_TUI_PLUGIN_ASSET, OPENCODE_TUI_PLUGIN_INSTALL_NAME, OPENCODE_TUI_PLUGIN_SPEC};
 #[cfg(windows)]
 use super::command::powershell_encoded_hook_command;
 #[cfg(not(windows))]

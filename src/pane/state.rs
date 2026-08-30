@@ -33,6 +33,8 @@ pub struct PaneState {
     /// before a cross-workspace move. This remains the fallback after the
     /// physical source workspace is closed.
     pub origin_workspace_label: Option<String>,
+    /// Whether unmodified right-click gestures should be forwarded to the pane application.
+    pub right_click_passthrough: bool,
 }
 
 impl PaneState {
@@ -42,6 +44,7 @@ impl PaneState {
             seen: true,
             origin_workspace_id: None,
             origin_workspace_label: None,
+            right_click_passthrough: false,
         }
     }
 }

@@ -256,7 +256,7 @@ impl AppState {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.selection = None;
                 self.selection_autoscroll = None;
-                self.workspace_press = None;
+                self.workspace_presses.clear();
                 self.pane_title_press = None;
 
                 if self.mode == Mode::ConfirmClose {

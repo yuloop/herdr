@@ -50,7 +50,7 @@ pub(crate) use self::terminal::{
 };
 pub use self::{
     state::PaneState,
-    terminal::{ScrollMetrics, TerminalCursorState},
+    terminal::{ScrollMetrics, TerminalCursorState, InputState},
 };
 
 const RELEASE_REACQUIRE_SUPPRESSION: std::time::Duration = std::time::Duration::from_secs(1);

@@ -203,7 +203,6 @@ const QWEN_HOOK_ASSET: &str = if cfg!(windows) {
     include_str!("assets/qwen/herdr-agent-session.sh")
 };
 const QWEN_INTEGRATION_VERSION: u32 = 1;
-const QWEN_HOOK_EVENTS: [(&str, &str); 1] = [("SessionStart", "session")];
 const QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS: [(&str, &str); 12] = [
     ("SessionStart", "idle"),
     ("UserPromptSubmit", "working"),
@@ -218,17 +217,6 @@ const QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS: [(&str, &str); 12] = [
     ("Stop", "idle"),
     ("SessionEnd", "release"),
 ];
-const QWEN_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
-    "herdr-agent-state.ps1"
-} else {
-    "herdr-agent-state.sh"
-};
-const QWEN_HOOK_ASSET: &str = if cfg!(windows) {
-    include_str!("assets/qwen/herdr-agent-state.ps1")
-} else {
-    include_str!("assets/qwen/herdr-agent-state.sh")
-};
-const QWEN_INTEGRATION_VERSION: u32 = 1;
 const QWEN_HOOK_TIMEOUT_MS: u64 = 10_000;
 const QWEN_HOOK_EVENTS: [(&str, Option<&str>, &str); 13] = [
     ("SessionStart", None, "session"),

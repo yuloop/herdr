@@ -1819,8 +1819,10 @@ pub struct AppState {
     // View geometry (computed before render, consumed by render + mouse)
     pub view: ViewState,
     pub(crate) drag: Option<DragState>,
-    pub(crate) workspace_press: Option<WorkspacePressState>,
-    pub(crate) tab_press: Option<TabPressState>,
+    pub(crate) workspace_presses:
+        std::collections::HashMap<crate::app::InputSourceId, WorkspacePressState>,
+    pub(crate) tab_presses:
+        std::collections::HashMap<crate::app::InputSourceId, TabPressState>,
     pub(crate) pane_title_press: Option<PaneTitlePressState>,
     pub selection: Option<Selection>,
     pub selection_autoscroll: Option<SelectionAutoscroll>,
@@ -2514,8 +2516,8 @@ impl AppState {
                 split_borders: Vec::new(),
             },
             drag: None,
-            workspace_press: None,
-            tab_press: None,
+            workspace_presses: std::collections::HashMap::new(),
+            tab_presses: std::collections::HashMap::new(),
             pane_title_press: None,
             selection: None,
             selection_autoscroll: None,

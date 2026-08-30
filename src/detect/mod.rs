@@ -62,7 +62,6 @@ pub enum Agent {
     Hermes,
     Kilo,
     Qodercli,
-    Qwen,
     Maki,
     Muse,
 }
@@ -90,7 +89,6 @@ impl Agent {
         Self::Hermes,
         Self::Kilo,
         Self::Qodercli,
-        Self::Qwen,
         Self::Maki,
         Self::Muse,
     ];
@@ -115,7 +113,6 @@ impl Agent {
         Self::Hermes,
         Self::Kilo,
         Self::Qodercli,
-        Self::Qwen,
         Self::Maki,
         Self::Muse,
     ];
@@ -144,7 +141,6 @@ pub fn agent_label(agent: Agent) -> &'static str {
         Agent::Hermes => "hermes",
         Agent::Kilo => "kilo",
         Agent::Qodercli => "qodercli",
-        Agent::Qwen => "qwen",
         Agent::Maki => "maki",
         Agent::Muse => "muse",
     }
@@ -896,7 +892,6 @@ mod tests {
             (Agent::Hermes, "hermes"),
             (Agent::Kilo, "kilo"),
             (Agent::Qodercli, "qodercli"),
-            (Agent::Qwen, "qwen"),
             (Agent::Maki, "maki"),
             (Agent::Muse, "muse"),
         ];

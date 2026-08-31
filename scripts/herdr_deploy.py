@@ -344,6 +344,7 @@ def rollback_to_old(
 def deploy(args: argparse.Namespace) -> dict[str, Any]:
     target = Path(args.target)
     staged = Path(args.staged)
+    locales_path: Path | None = Path(args.locales_tarball) if args.locales_tarball else None
     validate_deploy_path(target, "target")
     validate_deploy_path(staged, "staged binary")
     if target.parent.resolve() != staged.parent.resolve():
@@ -356,6 +357,11 @@ def deploy(args: argparse.Namespace) -> dict[str, Any]:
         raise DeploymentError("expected version has an unsafe or invalid format")
     if args.expected_protocol < 0:
         raise DeploymentError("expected protocol must be non-negative")
+
+    if locales_path is not None:
+        if sha256_file(locales_path) != args.locales_sha256:
+            raise DeploymentError("locales tarball SHA-256 does not match the build artifact")
+        _require_regular_file(locales_path, "locales tarball")
 
     _require_regular_file(target, "installed binary")
     _require_regular_file(staged, "staged binary")
@@ -394,6 +400,27 @@ def deploy(args: argparse.Namespace) -> dict[str, Any]:
 
         perform_handoff(target, new_identity)
         after = wait_for_runtime(target, new_identity, before, timeout=30)
+
+        if locales_path is not None:
+            locales_dest = target.parent / "locales"
+            os.makedirs(locales_dest, exist_ok=True)
+            install_args = [
+                "tar", "-xzf", str(locales_path),
+                "-C", str(locales_dest),
+            ]
+            result = subprocess.run(
+                install_args,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode != 0:
+                raise DeploymentError(
+                    "failed to extract locales tarball: "
+                    f"{_trim_output(result.stderr or result.stdout)}"
+                )
+
         atomic_write_text(
             state_file,
             f"{args.source_sha}\n",
@@ -445,6 +472,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("target", help="absolute installed Herdr binary path")
     parser.add_argument("staged", help="absolute staged binary path in the same directory")
+    parser.add_argument("locales_tarball", help="absolute path to staged locales tar.gz, or empty string")
+    parser.add_argument("locales_sha256", help="expected established locales SHA-256 (64-char lowercase hex)")
     parser.add_argument("source_sha", help="40-character source commit SHA")
     parser.add_argument("expected_version", help="version reported by the staged binary")
     parser.add_argument("expected_protocol", type=int, help="protocol reported by the staged binary")

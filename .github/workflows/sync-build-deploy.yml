@@ -399,11 +399,18 @@ jobs:
             echo "protocol=$expected_protocol"
             echo "sha256=$artifact_sha256  $ARTIFACT_NAME"
           } >> "$info"
+
+          install -d "$artifact_dir/locales"
+          cp -r locales/*.yml "$artifact_dir/locales/"
+          tar -czf "$artifact_dir/herdr-cn-locales.tar.gz" -C "$artifact_dir/locales" .
+          locales_sha256="$(sha256sum "$artifact_dir/herdr-cn-locales.tar.gz" | awk '{print $1}')"
           {
             echo "EXPECTED_VERSION=$expected_version"
             echo "EXPECTED_PROTOCOL=$expected_protocol"
             echo "ARTIFACT_SHA256=$artifact_sha256"
             echo "ARTIFACT_PATH=$artifact"
+            echo "LOCALES_PATH=$artifact_dir/herdr-cn-locales.tar.gz"
+            echo "LOCALES_SHA256=$locales_sha256"
           } >> "$GITHUB_ENV"
 
       - name: Upload verified Linux artifact
@@ -865,21 +872,26 @@ jobs:
           cleanup_stage() {
             ssh "${ssh_options[@]}" -p "$HERDR_DEPLOY_PORT" \
               "$HERDR_DEPLOY_USER@$HERDR_DEPLOY_HOST" \
-              "rm -f -- '$remote_stage'" >/dev/null 2>&1 || true
+              "rm -f -- '$remote_stage' '${remote_stage}.locales.tar.gz'" >/dev/null 2>&1 || true
           }
           trap cleanup_stage EXIT
           scp -q "${ssh_options[@]}" -P "$HERDR_DEPLOY_PORT" \
             "$ARTIFACT_PATH" \
             "$HERDR_DEPLOY_USER@$HERDR_DEPLOY_HOST:$remote_stage"
+          scp -q "${ssh_options[@]}" -P "$HERDR_DEPLOY_PORT" \
+            "$LOCALES_PATH" \
+            "$HERDR_DEPLOY_USER@$HERDR_DEPLOY_HOST:${remote_stage}.locales.tar.gz"
           ssh "${ssh_options[@]}" -p "$HERDR_DEPLOY_PORT" \
             "$HERDR_DEPLOY_USER@$HERDR_DEPLOY_HOST" \
             python3 - \
             "$HERDR_DEPLOY_PATH" \
             "$remote_stage" \
+            "${remote_stage}.locales.tar.gz" \
             "$SOURCE_SHA" \
             "$EXPECTED_VERSION" \
             "$EXPECTED_PROTOCOL" \
             "$ARTIFACT_SHA256" \
+            "$LOCALES_SHA256" \
             < scripts/herdr_deploy.py
           trap - EXIT
 

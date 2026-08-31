@@ -52,11 +52,17 @@ jobs:
             os: ubuntu-latest
             name: herdr-cn-nightly-${{ needs.resolve.outputs.ver }}-linux-x64
             ext: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            name: herdr-cn-nightly-${{ needs.resolve.outputs.ver }}-windows-x64
+            ext: zip
     runs-on: ${{ matrix.os }}
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}\vendor\libghostty-vt\.zig-cache
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}\vendor\libghostty-vt\.zig-cache
     steps:
       - uses: actions/checkout@v6
         with:
-          # 构建基于汉化 main（已含汉化补丁）；上游最新源码已在 main merge 上游时带入
           fetch-depth: 0
       - name: Install Rust
         uses: dtolnay/rust-toolchain@v1
@@ -64,15 +70,37 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
           targets: ${{ matrix.target }}
       - name: Install Zig
-        # build.rs 的 vendored libghostty-vt 在 Linux/Windows 都需要 zig（上游同款逻辑）
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.15.2
+          use-cache: false
       - name: Install Linux build tools
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build
+      - name: Install Windows build tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
+            choco install cmake ninja -y --no-progress
+          }
+      - name: Remove stale build caches (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          rm -rf .zig-cache vendor/libghostty-vt/.zig-cache vendor/libghostty-vt/zig-out
+          rm -rf target/${{ matrix.target }}/release
+      - name: Remove stale build caches (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -Recurse -Force .zig-cache -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force vendor/libghostty-vt/.zig-cache -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force vendor/libghostty-vt/zig-out -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force target/x86_64-pc-windows-msvc/release -ErrorAction SilentlyContinue
       - name: Build release binary
         shell: bash
         env:
@@ -86,6 +114,13 @@ jobs:
           mkdir -p dist
           cp target/${{ matrix.target }}/release/herdr dist/herdr
           tar -czf dist/${{ matrix.name }}.tar.gz -C dist herdr
+      - name: Package Windows zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "target\${{ matrix.target }}\release\herdr.exe" dist\herdr.exe
+          Compress-Archive -Path dist\herdr.exe -DestinationPath "dist\${{ matrix.name }}.zip" -Force
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -110,7 +145,7 @@ jobs:
       - name: Compute SHA256SUMS
         run: |
           cd dist
-          sha256sum herdr-cn-nightly-*.tar.gz > SHA256SUMS
+          sha256sum herdr-cn-nightly-*.tar.gz herdr-cn-nightly-*.zip > SHA256SUMS
           ls -la
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -120,8 +155,8 @@ jobs:
           body: |
             herdr 汉化实时预览版（上游 master ${{ needs.resolve.outputs.sha12 }}）
 
-            - Linux x64 单平台
-          files: dist/*.tar.gz,dist/SHA256SUMS
+            - Linux x64 / Windows x64 双平台
+          files: dist/*.tar.gz,dist/*.zip,dist/SHA256SUMS
           make_latest: false
           prerelease: true
           fail_on_unmatched_files: true

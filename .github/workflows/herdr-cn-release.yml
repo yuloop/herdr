@@ -107,7 +107,8 @@ jobs:
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/herdr dist/herdr
-          tar -czf dist/${{ matrix.name }}.tar.gz -C dist herdr
+          cp -r locales dist/ 2>/dev/null || true
+          tar -czf dist/${{ matrix.name }}.tar.gz -C dist herdr locales
           sha256sum dist/${{ matrix.name }}.tar.gz
       - name: Package Windows zip
         if: runner.os == 'Windows'

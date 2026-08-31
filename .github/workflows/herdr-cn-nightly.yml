@@ -30,9 +30,9 @@ jobs:
           UP_SHA=$(git rev-parse upstream/master)
           SHA12="${UP_SHA:0:12}"
           VER=$(git show upstream/master:Cargo.toml | grep '^version' | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          CN_TAG="v${VER}-cn-nightly-${SHA12}"
-          echo "upstream: ${UP_SHA} / version ${VER}"
-          # tag 含 sha 天然防重：已存在 = 已构建过
+          CN_TAG="v${VER}-cn-nightly-${SHA12}-${GITHUB_RUN_NUMBER}"
+          echo "upstream: ${UP_SHA} / version ${VER} / run ${GITHUB_RUN_NUMBER}"
+          # tag 含 run_number 天然防重：每次 workflow_dispatch 都会生成新 tag
           if git rev-parse -q --verify "refs/tags/${CN_TAG}" >/dev/null 2>&1; then
             echo "nightly ${CN_TAG} 已存在，跳过"
             echo "should_build=false" >> "$GITHUB_OUTPUT"

@@ -53,9 +53,6 @@ jobs:
             name: herdr-cn-nightly-${{ needs.resolve.outputs.ver }}-linux-x64
             ext: tar.gz
     runs-on: ${{ matrix.os }}
-    env:
-      LIBGHOSTTY_VT_OPTIMIZE: ${{ env.LIBGHOSTTY_VT_OPTIMIZE }}
-      LIBGHOSTTY_VT_SIMD: ${{ env.LIBGHOSTTY_VT_SIMD }}
     steps:
       - uses: actions/checkout@v6
         with:

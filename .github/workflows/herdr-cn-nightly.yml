@@ -115,9 +115,26 @@ jobs:
           tag_name: ${{ needs.resolve.outputs.tag }}
           name: herdr 汉化预览 ${{ needs.resolve.outputs.tag }}
           body: |
-            herdr 汉化实时预览版（上游 master ${{ needs.resolve.outputs.sha12 }}）
+            ## herdr 汉化实时预览版
 
-            - Linux x64 单平台
+            基于上游 master [herdrdev/herdr](https://github.com/herdrdev/herdr) 最新提交自动构建。
+
+            - 上游最新提交：`${{ needs.resolve.outputs.sha12 }}`（main 分支，对应版本 v0.8.2）
+            - 汉化 fork 独有功能：反官方自动更新、剪贴板复制三态、布局重排 API、窗格转移 API、工作区来源追踪、QWEN/Copilot 智能体检测
+            - **实时预览版**：每次上游新提交自动构建，页面只保留最新 1 个预览条目（旧预览版自动清理）
+            - 追求稳定请下载正式版（`v0.8.2-cn`，见下方 Latest 发布）
+
+            ## 下载
+
+            下载
+            | 平台 | 文件 |
+            |---|---|
+            | Linux x64 | `herdr-cn-nightly-${{ needs.resolve.outputs.ver }}-linux-x64.tar.gz` |
+            | 汉化源码 | 仓库 `main` 分支 |
+
+            所有文件的 SHA-256 摘要见 `SHA256SUMS`。
+
+            > 本项目是社区维护的非官方汉化构建，与 herdr 官方团队无隶属关系。
           files: dist/*.tar.gz,dist/SHA256SUMS
           make_latest: false
           prerelease: true

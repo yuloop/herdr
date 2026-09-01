@@ -126,7 +126,7 @@ jobs:
             所有文件的 SHA-256 摘要见 `SHA256SUMS`。
             
             > 本项目是社区维护的非官方汉化构建，与 herdr 官方团队无隶属关系。
-          files: dist/*.tar.gz,dist/*.zip,dist/SHA256SUMS
+          files: dist/*.tar.gz,dist/SHA256SUMS
           make_latest: false
           prerelease: true
           fail_on_unmatched_files: true

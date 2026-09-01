@@ -114,23 +114,31 @@ jobs:
           tag_name: ${{ needs.resolve.outputs.tag }}
           name: herdr 汉化预览 ${{ needs.resolve.outputs.tag }}
           body: |
-            herdr 汉化实时预览版（上游 master ${{ needs.resolve.outputs.sha12 }}）
-
-            - Linux x64 单平台
-          files: dist/*.tar.gz,dist/SHA256SUMS
+            ## herdr 汉化实时预览版（上游 master ${{ needs.resolve.outputs.sha12 }}）
+            
+            [上游 herdr/herdr (master)](https://github.com/herdrdev/herdr)
+            
+            | 文件 | 说明 |
+            | --- | --- |
+            | `herdr-cn-nightly-${{ needs.resolve.outputs.ver }}-linux-x64.tar.gz` | Linux x64 单平台 |
+            | 汉化源码 | 仓库 `main` 分支 |
+            
+            所有文件的 SHA-256 摘要见 `SHA256SUMS`。
+            
+            > 本项目是社区维护的非官方汉化构建，与 herdr 官方团队无隶属关系。
+          files: dist/*.tar.gz,dist/*.zip,dist/SHA256SUMS
           make_latest: false
           prerelease: true
           fail_on_unmatched_files: true
       - name: Delete outdated preview releases
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.YU_TOKEN }}
+          LATEST_TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           # 页面只保留最新 1 个预览条目：删掉其他 tag 含 -cn-nightly 的 release
-          LATEST_TAG="${{ needs.resolve.outputs.tag }}"
-          gh api "repos/yuloop/herdr/releases?per_page=50" --jq '.[] | select(.prerelease==true or (.tag_name | contains("-cn-nightly"))) | .tag_name' \
-            | while read -r t; do
-                if [ "$t" != "$LATEST_TAG" ]; then
-                  echo "删除旧预览 $t"
-                  gh api -X DELETE "repos/yuloop/herdr/releases/tags/$t" || true
-                fi
+          gh api "repos/yuloop/herdr/releases?per_page=50" --paginate \
+            --jq '.[] | select(.prerelease == true and .draft == false and .tag_name != env.LATEST_TAG and (.tag_name | contains("-cn-nightly"))) | .id' \
+            | while read -r id; do
+                echo "deleting outdated preview release id=$id"
+                gh api -X DELETE "repos/yuloop/herdr/releases/$id" || echo "delete failed id=$id"
               done

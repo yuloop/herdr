@@ -17,6 +17,7 @@ jobs:
       tag: ${{ steps.res.outputs.tag }}
       ver: ${{ steps.res.outputs.ver }}
       sha12: ${{ steps.res.outputs.sha12 }}
+      files: ${{ steps.res.outputs.files }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -42,6 +43,7 @@ jobs:
           echo "tag=${CN_TAG}" >> "$GITHUB_OUTPUT"
           echo "ver=${VER}" >> "$GITHUB_OUTPUT"
           echo "sha12=${SHA12}" >> "$GITHUB_OUTPUT"
+          echo "files=dist/*.tar.gz,dist/SHA256SUMS" >> "$GITHUB_OUTPUT"
   build:
     needs: resolve
     if: needs.resolve.outputs.should_build == 'true'
@@ -126,7 +128,7 @@ jobs:
             所有文件的 SHA-256 摘要见 `SHA256SUMS`。
             
             > 本项目是社区维护的非官方汉化构建，与 herdr 官方团队无隶属关系。
-          files: dist/*.tar.gz,dist/SHA256SUMS
+          files: ${{ needs.resolve.outputs.files }}
           make_latest: false
           prerelease: true
           fail_on_unmatched_files: true

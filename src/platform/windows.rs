@@ -3937,3 +3937,27 @@ mod tests {
         }
     }
 }
+
+// --- status command stubs (no-op on Windows, no Unix PTY status line support) ---
+
+pub(crate) fn status_commands_supported() -> bool {
+    false
+}
+
+pub(crate) fn configure_status_command(_process: &mut std::process::Command) {}
+
+pub(crate) struct StatusCommandGuard;
+
+impl StatusCommandGuard {
+    pub(crate) fn new(_child: &tokio::process::Child) -> std::io::Result<Self> {
+        Ok(Self)
+    }
+
+    pub(crate) fn terminate(&mut self) {}
+}
+
+pub(crate) fn set_default_plugin_pane_pwd(
+    _env: &mut Vec<(String, String)>,
+    _cwd: &std::path::Path,
+) {
+}

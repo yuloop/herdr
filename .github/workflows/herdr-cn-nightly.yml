@@ -43,7 +43,7 @@ jobs:
           echo "tag=${CN_TAG}" >> "$GITHUB_OUTPUT"
           echo "ver=${VER}" >> "$GITHUB_OUTPUT"
           echo "sha12=${SHA12}" >> "$GITHUB_OUTPUT"
-          echo "files=dist/*.tar.gz,dist/SHA256SUMS" >> "$GITHUB_OUTPUT"
+          echo "files=dist/*.tar.gz,dist/*.zip,dist/SHA256SUMS" >> "$GITHUB_OUTPUT"
   build:
     needs: resolve
     if: needs.resolve.outputs.should_build == 'true'
@@ -54,6 +54,12 @@ jobs:
             os: ubuntu-latest
             name: herdr-cn-nightly-${{ needs.resolve.outputs.ver }}-linux-x64
             ext: tar.gz
+            setup: linux
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            name: herdr-cn-nightly-${{ needs.resolve.outputs.ver }}-windows-x64
+            ext: zip
+            setup: windows
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
@@ -69,6 +75,7 @@ jobs:
         with:
           version: 0.15.2
       - name: Install Linux build tools
+        if: matrix.setup == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build
@@ -80,10 +87,18 @@ jobs:
           cargo build --release --locked --bin herdr --target ${{ matrix.target }}
           ls -la target/${{ matrix.target }}/release/herdr* | head -5
       - name: Package Linux tarball
+        if: matrix.setup == 'linux'
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/herdr dist/herdr
           tar -czf dist/${{ matrix.name }}.tar.gz -C dist herdr
+      - name: Package Windows zip
+        if: matrix.setup == 'windows'
+        shell: pwsh
+        run: |
+          mkdir -p dist
+          Copy-Item "target\${{ matrix.target }}\release\herdr.exe" "dist\herdr.exe"
+          Compress-Archive -Path "dist\herdr.exe" -DestinationPath "dist\${{ matrix.name }}.zip"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -106,9 +121,10 @@ jobs:
           path: dist/
           merge-multiple: true
       - name: Compute SHA256SUMS
+        shell: bash
         run: |
           cd dist
-          sha256sum herdr-cn-nightly-*.tar.gz > SHA256SUMS
+          sha256sum *.tar.gz *.zip > SHA256SUMS
           ls -la
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -122,7 +138,8 @@ jobs:
             
             | 文件 | 说明 |
             | --- | --- |
-            | `herdr-cn-nightly-${{ needs.resolve.outputs.ver }}-linux-x64.tar.gz` | Linux x64 单平台 |
+            | `herdr-cn-nightly-${{ needs.resolve.outputs.ver }}-linux-x64.tar.gz` | Linux x64 |
+            | `herdr-cn-nightly-${{ needs.resolve.outputs.ver }}-windows-x64.zip` | Windows x64 |
             | 汉化源码 | 仓库 `main` 分支 |
             
             所有文件的 SHA-256 摘要见 `SHA256SUMS`。

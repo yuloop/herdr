@@ -144,6 +144,22 @@ cli:
   plugin_pane_open_about: "打开插件窗格"
   plugin_pane_focus_about: "聚焦插件窗格"
   plugin_pane_close_about: "关闭插件窗格"
+  agent_prompt_about: "向智能体提交提示"
+  agent_prompt_wait_help: "等待提交后首次观察到的匹配状态"
+  agent_prompt_until_help: "与 --wait 配合时要匹配的状态；可重复指定"
+  agent_wait_states_about: "等待智能体到达所请求的状态之一"
+  agent_wait_until_help: "要匹配的状态；可重复指定"
+  agent_wait_timeout_help: "超过此毫秒数后失败"
+  agent_start_interactive_about: "在现有窗格中启动受支持的交互式智能体"
+  agent_start_kind_help: "受支持的智能体类型与规范可执行文件"
+  agent_start_pane_help: "位于交互式 shell 提示符处的现有窗格"
+  agent_start_ready_help: "等待交互就绪（默认 30000；最大 300000）"
+  pane_input_about: "设置窗格输入路由"
+  pane_match_literal_help: "匹配字面子串"
+  pane_match_regex_help: "匹配 Rust 正则表达式"
+  pane_match_lines_help: "将被搜索的快照限制为 N 行"
+  pane_match_raw_help: "匹配时保留 ANSI 转义序列"
+  terminal_control_about: "控制终端流"
 
 # TUI 通用词汇
 common:

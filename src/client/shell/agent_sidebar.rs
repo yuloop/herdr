@@ -76,20 +76,24 @@ pub(super) fn render_agent_panel(
         area.x,
         area.y + 1,
         area.width,
-        " agents",
+        &rust_i18n::t!("sidebar.agents").to_string(),
         Style::default()
             .fg(config.palette.overlay0)
             .add_modifier(Modifier::BOLD),
     );
-    let sort_label =
+    let sort_label: String =
         snapshot
             .agent_view_label
-            .as_deref()
+            .clone()
             .unwrap_or(match config.agent_panel_sort {
-                crate::config::AgentPanelSortConfig::Spaces => "grouped",
-                crate::config::AgentPanelSortConfig::Priority => "priority",
+                crate::config::AgentPanelSortConfig::Spaces => {
+                    rust_i18n::t!("status.grouped").to_string()
+                }
+                crate::config::AgentPanelSortConfig::Priority => {
+                    rust_i18n::t!("status.priority").to_string()
+                }
             });
-    let sort_width = display_width(sort_label).min(area.width as usize) as u16;
+    let sort_width = display_width(&sort_label).min(area.width as usize) as u16;
     let sort_rect = Rect::new(
         area.right().saturating_sub(sort_width),
         area.y + 1,
@@ -106,7 +110,7 @@ pub(super) fn render_agent_panel(
         sort_rect.x,
         sort_rect.y,
         sort_rect.width,
-        sort_label,
+        &sort_label,
         Style::default()
             .fg(if snapshot.agent_view_label.is_some() {
                 config.palette.accent

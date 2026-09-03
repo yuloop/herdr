@@ -1,29 +1,30 @@
 use std::io::Write;
 
 use clap::{Arg, ArgAction, ArgGroup, Command, ValueHint};
+use rust_i18n::t;
 
 pub(super) fn command() -> Command {
     let command = Command::new("herdr")
-        .about("terminal workspace manager for AI coding agents")
+        .about(t!("cli.herdr_about").to_string())
         .disable_help_flag(true)
         .disable_version_flag(true)
         .arg(help_flag())
-        .arg(option("session", "NAME").help("Use or create a named persistent session"))
-        .arg(option("remote", "TARGET").help("Attach through SSH to a remote Herdr server"))
+        .arg(option("session", "NAME").help(t!("cli.session_help").to_string()))
+        .arg(option("remote", "TARGET").help(t!("cli.remote_help").to_string()))
         .arg(
             option("remote-keybindings", "MODE")
                 .value_parser(["local", "server"])
-                .help("Choose local or server keybindings for remote attach"),
+                .help(t!("cli.remote_keybindings_help").to_string()),
         )
-        .arg(flag("handoff").help("Opt into live handoff for update or remote attach"))
-        .arg(flag("default-config").help("Print default configuration and exit"))
-        .arg(flag("skill").help("Print the agent skill file and exit"))
+        .arg(flag("handoff").help(t!("cli.handoff_help").to_string()))
+        .arg(flag("default-config").help(t!("cli.default_config_help").to_string()))
+        .arg(flag("skill").help(t!("cli.skill_help").to_string()))
         .arg(
             Arg::new("version")
                 .short('V')
                 .long("version")
                 .action(ArgAction::SetTrue)
-                .help("Print version and exit"),
+                .help(t!("cli.version_help").to_string()),
         )
         .subcommand(completion_command())
         .subcommand(update_command())
@@ -111,87 +112,91 @@ fn write_requested_help(
 fn completion_command() -> Command {
     Command::new("completion")
         .visible_alias("completions")
-        .about("Generate shell completion scripts")
+        .about(t!("cli.completion_about").to_string())
         .arg(
             Arg::new("shell")
                 .value_name("SHELL")
                 .required(true)
                 .value_parser(super::completion::SUPPORTED_SHELLS)
-                .help("Shell to generate completions for"),
+                .help(t!("cli.completion_shell_help").to_string()),
         )
 }
 
 fn update_command() -> Command {
     Command::new("update")
-        .about("Download and install the latest version")
-        .arg(flag("handoff").help("Try live handoff after installing"))
+        .about(t!("cli.update_about").to_string())
+        .arg(flag("handoff").help(t!("cli.update_handoff_help").to_string()))
 }
 
 fn status_command() -> Command {
     Command::new("status")
-        .about("Show local client and running server status")
+        .about(t!("cli.status_about").to_string())
         .arg(json_flag())
         .subcommand(
             Command::new("server")
-                .about("Show running server status")
+                .about(t!("cli.status_server_about").to_string())
                 .arg(json_flag()),
         )
         .subcommand(
             Command::new("client")
-                .about("Show local client status")
+                .about(t!("cli.status_client_about").to_string())
                 .arg(json_flag()),
         )
 }
 
 fn config_command() -> Command {
     Command::new("config")
-        .about("Manage local configuration")
-        .subcommand(Command::new("check").about("Validate config.toml and print diagnostics"))
-        .subcommand(Command::new("reset-keys").about("Reset custom keybindings"))
+        .about(t!("cli.config_about").to_string())
+        .subcommand(Command::new("check").about(t!("cli.config_check_about").to_string()))
+        .subcommand(Command::new("reset-keys").about(t!("cli.config_reset_keys_about").to_string()))
 }
 
 fn channel_command() -> Command {
     Command::new("channel")
-        .about("Manage stable and preview update channels")
-        .subcommand(Command::new("show").about("Print the configured update channel"))
+        .about(t!("cli.channel_about").to_string())
+        .subcommand(Command::new("show").about(t!("cli.channel_show_about").to_string()))
         .subcommand(
-            Command::new("set").about("Choose the update channel").arg(
-                Arg::new("channel")
-                    .value_name("CHANNEL")
-                    .required(true)
-                    .value_parser(["stable", "preview"]),
-            ),
+            Command::new("set")
+                .about(t!("cli.channel_set_about").to_string())
+                .arg(
+                    Arg::new("channel")
+                        .value_name("CHANNEL")
+                        .required(true)
+                        .value_parser(["stable", "preview"]),
+                ),
         )
 }
 
 fn server_command() -> Command {
     Command::new("server")
-        .about("Run or control the headless server")
-        .subcommand(Command::new("stop").about("Stop the running server"))
-        .subcommand(Command::new("reload-config").about("Reload config in the running server"))
+        .about(t!("cli.server_about").to_string())
+        .subcommand(Command::new("stop").about(t!("cli.server_stop_about").to_string()))
+        .subcommand(
+            Command::new("reload-config").about(t!("cli.server_reload_config_about").to_string()),
+        )
         .subcommand(
             Command::new("agent-manifests")
-                .about("Show active agent detection manifests")
+                .about(t!("cli.server_agent_manifests_about").to_string())
                 .arg(json_flag()),
         )
         .subcommand(
             Command::new("update-agent-manifests")
-                .about("Fetch and reload agent detection manifests")
+                .about(t!("cli.server_update_agent_manifests_about").to_string())
                 .arg(json_flag()),
         )
         .subcommand(
             Command::new("reload-agent-manifests")
-                .about("Reload local agent detection manifest overrides"),
+                .about(t!("cli.server_reload_agent_manifests_about").to_string()),
         )
 }
 
 fn api_command() -> Command {
     Command::new("api")
-        .about("Inspect socket API metadata and live runtime state")
-        .subcommand(Command::new("snapshot").about("Print the live session snapshot"))
+        .about(t!("cli.api_about").to_string())
+        .subcommand(Command::new("snapshot").about(t!("cli.api_snapshot_about").to_string()))
         .subcommand(
             Command::new("schema")
-                .about("Print or write the bundled API schema")
+                .about(t!("cli.api_schema_about").to_string())
                 .arg(json_flag())
                 .arg(path_option("output", "PATH")),
         )
@@ -199,28 +204,36 @@ fn api_command() -> Command {
 
 fn workspace_command() -> Command {
     Command::new("workspace")
-        .about("Manage workspaces over the socket API")
-        .subcommand(Command::new("list").about("List workspaces"))
+        .about(t!("cli.workspace_about").to_string())
+        .subcommand(Command::new("list").about(t!("cli.workspace_list_about").to_string()))
         .subcommand(
             Command::new("create")
-                .about("Create a workspace")
+                .about(t!("cli.workspace_create_about").to_string())
                 .arg(path_option("cwd", "PATH"))
                 .arg(option("label", "TEXT"))
                 .arg(env_option())
                 .arg(flag("focus"))
                 .arg(flag("no-focus")),
         )
-        .subcommand(id_command("get", "workspace_id", "Show a workspace"))
-        .subcommand(id_command("focus", "workspace_id", "Focus a workspace"))
+        .subcommand(id_command(
+            "get",
+            "workspace_id",
+            t!("cli.workspace_get_about").to_string(),
+        ))
+        .subcommand(id_command(
+            "focus",
+            "workspace_id",
+            t!("cli.workspace_focus_about").to_string(),
+        ))
         .subcommand(
             Command::new("rename")
-                .about("Rename a workspace")
+                .about(t!("cli.workspace_rename_about").to_string())
                 .arg(required("workspace_id", "WORKSPACE_ID"))
                 .arg(required("label", "LABEL").num_args(1..)),
         )
         .subcommand(
             Command::new("report-metadata")
-                .about("Report display-only workspace metadata")
+                .about(t!("cli.workspace_report_metadata_about").to_string())
                 .arg(required("workspace_id", "WORKSPACE_ID"))
                 .arg(option("source", "ID").required(true))
                 .arg(repeatable_option("token", "NAME=VALUE"))
@@ -228,22 +241,26 @@ fn workspace_command() -> Command {
                 .arg(option("seq", "N"))
                 .arg(option("ttl-ms", "N")),
         )
-        .subcommand(id_command("close", "workspace_id", "Close a workspace"))
+        .subcommand(id_command(
+            "close",
+            "workspace_id",
+            t!("cli.workspace_close_about").to_string(),
+        ))
 }
 
 fn worktree_command() -> Command {
     Command::new("worktree")
-        .about("Manage Git worktree-backed workspaces")
+        .about(t!("cli.worktree_about").to_string())
         .subcommand(
             Command::new("list")
-                .about("List worktree workspaces")
+                .about(t!("cli.worktree_list_about").to_string())
                 .arg(option("workspace", "ID"))
                 .arg(path_option("cwd", "PATH"))
                 .arg(flag("trust-repository")),
         )
         .subcommand(
             Command::new("create")
-                .about("Create and open a Git worktree")
+                .about(t!("cli.worktree_create_about").to_string())
                 .arg(option("workspace", "ID"))
                 .arg(path_option("cwd", "PATH"))
                 .arg(option("branch", "NAME"))
@@ -256,7 +273,7 @@ fn worktree_command() -> Command {
         )
         .subcommand(
             Command::new("open")
-                .about("Open an existing Git worktree")
+                .about(t!("cli.worktree_open_about").to_string())
                 .arg(option("workspace", "ID"))
                 .arg(path_option("cwd", "PATH"))
                 .arg(path_option("path", "PATH"))
@@ -268,7 +285,7 @@ fn worktree_command() -> Command {
         )
         .subcommand(
             Command::new("remove")
-                .about("Remove a worktree checkout")
+                .about(t!("cli.worktree_remove_about").to_string())
                 .arg(option("workspace", "ID"))
                 .arg(flag("force"))
                 .arg(flag("trust-repository")),
@@ -277,15 +294,15 @@ fn worktree_command() -> Command {
 
 fn tab_command() -> Command {
     Command::new("tab")
-        .about("Manage tabs over the socket API")
+        .about(t!("cli.tab_about").to_string())
         .subcommand(
             Command::new("list")
-                .about("List tabs")
+                .about(t!("cli.tab_list_about").to_string())
                 .arg(option("workspace", "WORKSPACE_ID")),
         )
         .subcommand(
             Command::new("create")
-                .about("Create a tab")
+                .about(t!("cli.tab_create_about").to_string())
                 .arg(option("workspace", "WORKSPACE_ID"))
                 .arg(path_option("cwd", "PATH"))
                 .arg(option("label", "TEXT"))
@@ -293,23 +310,35 @@ fn tab_command() -> Command {
                 .arg(flag("focus"))
                 .arg(flag("no-focus")),
         )
-        .subcommand(id_command("get", "tab_id", "Show a tab"))
-        .subcommand(id_command("focus", "tab_id", "Focus a tab"))
+        .subcommand(id_command(
+            "get",
+            "tab_id",
+            t!("cli.tab_get_about").to_string(),
+        ))
+        .subcommand(id_command(
+            "focus",
+            "tab_id",
+            t!("cli.tab_focus_about").to_string(),
+        ))
         .subcommand(
             Command::new("rename")
-                .about("Rename a tab")
+                .about(t!("cli.tab_rename_about").to_string())
                 .arg(required("tab_id", "TAB_ID"))
                 .arg(required("label", "LABEL").num_args(1..)),
         )
-        .subcommand(id_command("close", "tab_id", "Close a tab"))
+        .subcommand(id_command(
+            "close",
+            "tab_id",
+            t!("cli.tab_close_about").to_string(),
+        ))
 }
 
 fn notification_command() -> Command {
     Command::new("notification")
-        .about("Show Herdr notifications")
+        .about(t!("cli.notification_about").to_string())
         .subcommand(
             Command::new("show")
-                .about("Show a notification")
+                .about(t!("cli.notification_show_about").to_string())
                 .arg(required("title", "TITLE"))
                 .arg(option("body", "TEXT"))
                 .arg(option("position", "POSITION").value_parser([
@@ -324,12 +353,12 @@ fn notification_command() -> Command {
 
 fn agent_command() -> Command {
     Command::new("agent")
-        .about("Control and inspect agent panes")
-        .subcommand(Command::new("list").about("List agents"))
-        .subcommand(id_command("get", "target", "Show an agent"))
+        .about(t!("cli.agent_about").to_string())
+        .subcommand(Command::new("list").about(t!("cli.agent_list_about").to_string()))
+        .subcommand(id_command("get", "target", t!("cli.agent_get_about").to_string()))
         .subcommand(
             Command::new("read")
-                .about("Read agent terminal output")
+                .about(t!("cli.agent_read_about").to_string())
                 .override_usage("herdr agent read <TARGET> [OPTIONS]")
                 .arg(required("target", "TARGET"))
                 .arg(read_source_option(true))
@@ -339,32 +368,32 @@ fn agent_command() -> Command {
         )
         .subcommand(
             Command::new("send-keys")
-                .about("Send key presses to an agent")
+                .about(t!("cli.agent_send_keys_about").to_string())
                 .arg(required("target", "TARGET"))
                 .arg(required("key", "KEY").num_args(1..))
                 .after_help("Use esc as the canonical Escape key name; escape is also accepted."),
         )
         .subcommand(
             Command::new("prompt")
-                .about("Submit a prompt to an agent")
+                .about(t!("cli.agent_prompt_about").to_string())
                 .override_usage("herdr agent prompt <TARGET> <TEXT> [OPTIONS]")
                 .arg(required("target", "TARGET"))
                 .arg(required("text", "TEXT"))
                 .arg(
                     flag("wait")
-                        .help("Wait for the first matching state observed after submission"),
+                        .help(t!("cli.agent_prompt_wait_help").to_string()),
                 )
                 .arg(
                     option("until", "STATUS")
                         .action(ArgAction::Append)
                         .requires("wait")
                         .value_parser(["idle", "working", "blocked", "done", "unknown"])
-                        .help("State to match after --wait; repeat for more than one state"),
+                        .help(t!("cli.agent_prompt_until_help").to_string()),
                 )
                 .arg(
                     option("timeout", "MS")
                         .requires("wait")
-                        .help("Fail after this many milliseconds"),
+                        .help(t!("cli.agent_wait_timeout_help").to_string()),
                 )
                 .after_help(
                     "If the agent is already blocked, submission is rejected with agent_blocked before any input is sent. When an accepted submission starts from another non-working state, --wait requires an observed working or blocked state within 5000ms; otherwise it returns agent_prompt_stalled. A caller timeout that expires first returns timeout. It then matches idle, done, or blocked by default, or any exact --until state. It does not track turns: if the agent is already working, that active turn's completion may match.",
@@ -372,7 +401,7 @@ fn agent_command() -> Command {
         )
         .subcommand(
             Command::new("rename")
-                .about("Rename an agent")
+                .about(t!("cli.agent_rename_about").to_string())
                 .override_usage("herdr agent rename <TARGET> <NAME>|--clear")
                 .arg(required("target", "TARGET"))
                 .arg(Arg::new("name").value_name("NAME"))
@@ -383,33 +412,33 @@ fn agent_command() -> Command {
                         .required(true),
                 ),
         )
-        .subcommand(id_command("focus", "target", "Focus an agent"))
+        .subcommand(id_command("focus", "target", t!("cli.agent_focus_about").to_string()))
         .subcommand(
             Command::new("wait")
-                .about("Wait until an agent reaches one of the requested states")
+                .about(t!("cli.agent_wait_states_about").to_string())
                 .override_usage("herdr agent wait <TARGET> [OPTIONS]")
                 .arg(required("target", "TARGET"))
                 .arg(
                     option("until", "STATUS")
                         .action(ArgAction::Append)
                         .value_parser(["idle", "working", "blocked", "done", "unknown"])
-                        .help("State to match; repeat for more than one state"),
+                        .help(t!("cli.agent_wait_until_help").to_string()),
                 )
-                .arg(option("timeout", "MS").help("Fail after this many milliseconds"))
+                .arg(option("timeout", "MS").help(t!("cli.agent_wait_timeout_help").to_string()))
                 .after_help(
                     "Without --until, matches idle, done, or blocked. Use --until unknown explicitly when needed. Without --timeout, waits indefinitely.",
                 ),
         )
         .subcommand(
             Command::new("attach")
-                .about("Attach directly to an agent terminal")
+                .about(t!("cli.agent_attach_about").to_string())
                 .override_usage("herdr agent attach <TARGET> [OPTIONS]")
                 .arg(required("target", "TARGET"))
                 .arg(flag("takeover")),
         )
         .subcommand(
             Command::new("start")
-                .about("Start a supported interactive agent in an existing pane")
+                .about(t!("cli.agent_start_interactive_about").to_string())
                 .override_usage(
                     "herdr agent start <NAME> --kind <KIND> --pane <ID> [OPTIONS] [-- [AGENT_ARG]...]",
                 )
@@ -418,16 +447,16 @@ fn agent_command() -> Command {
                     option("kind", "KIND")
                         .required(true)
                         .value_parser(agent_kind_values())
-                        .help("Supported agent kind and canonical executable"),
+                        .help(t!("cli.agent_start_kind_help").to_string()),
                 )
                 .arg(
                     option("pane", "ID")
                         .required(true)
-                        .help("Existing pane at an interactive shell prompt"),
+                        .help(t!("cli.agent_start_pane_help").to_string()),
                 )
                 .arg(
                     option("timeout", "MS")
-                        .help("Wait for interactive readiness (default: 30000; max: 300000)"),
+                        .help(t!("cli.agent_start_ready_help").to_string()),
                 )
                 .arg(
                     Arg::new("agent_args")
@@ -441,7 +470,7 @@ fn agent_command() -> Command {
         )
         .subcommand(
             Command::new("explain")
-                .about("Explain agent detection state")
+                .about(t!("cli.agent_explain_about").to_string())
                 .arg(Arg::new("target").value_name("TARGET"))
                 .arg(path_option("file", "PATH"))
                 .arg(option("agent", "LABEL"))
@@ -465,55 +494,55 @@ pub(super) fn agent_kind_values() -> Vec<&'static str> {
 
 fn pane_command() -> Command {
     Command::new("pane")
-        .about("Control terminal panes")
+        .about(t!("cli.pane_about").to_string())
         .subcommand(
             Command::new("list")
-                .about("List panes")
+                .about(t!("cli.pane_list_about").to_string())
                 .arg(option("workspace", "WORKSPACE_ID")),
         )
         .subcommand(
             Command::new("current")
-                .about("Show the current pane")
+                .about(t!("cli.pane_current_about").to_string())
                 .args(current_pane_args()),
         )
-        .subcommand(id_command("get", "pane_id", "Show a pane"))
+        .subcommand(id_command("get", "pane_id", t!("cli.pane_get_about").to_string()))
         .subcommand(
             Command::new("layout")
-                .about("Show pane layout information")
+                .about(t!("cli.pane_layout_about").to_string())
                 .args(current_pane_args()),
         )
         .subcommand(
             Command::new("process-info")
-                .about("Show pane process information")
+                .about(t!("cli.pane_process_info_about").to_string())
                 .args(current_pane_args()),
         )
         .subcommand(
             Command::new("neighbor")
-                .about("Find a pane neighbor")
+                .about(t!("cli.pane_neighbor_about").to_string())
                 .arg(required_direction_option())
                 .args(current_pane_args()),
         )
         .subcommand(
             Command::new("edges")
-                .about("Show pane edge information")
+                .about(t!("cli.pane_edges_about").to_string())
                 .args(current_pane_args()),
         )
         .subcommand(
             Command::new("focus")
-                .about("Focus a neighboring pane")
+                .about(t!("cli.pane_focus_about").to_string())
                 .arg(required_direction_option())
                 .args(current_pane_args()),
         )
         .subcommand(
             Command::new("resize")
-                .about("Resize a pane split")
+                .about(t!("cli.pane_resize_about").to_string())
                 .arg(required_direction_option())
                 .arg(option("amount", "FLOAT"))
                 .args(current_pane_args()),
         )
         .subcommand(
             Command::new("zoom")
-                .about("Toggle or set pane zoom")
+                .about(t!("cli.pane_zoom_about").to_string())
                 .arg(Arg::new("pane_id").value_name("PANE_ID"))
                 .args(current_pane_args())
                 .arg(flag("toggle"))
@@ -522,7 +551,7 @@ fn pane_command() -> Command {
         )
         .subcommand(
             Command::new("read")
-                .about("Read pane terminal output")
+                .about(t!("cli.pane_read_about").to_string())
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(read_source_option(true))
                 .arg(option("lines", "N"))
@@ -532,14 +561,14 @@ fn pane_command() -> Command {
         )
         .subcommand(
             Command::new("rename")
-                .about("Rename a pane")
+                .about(t!("cli.pane_rename_about").to_string())
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(Arg::new("label").value_name("LABEL").num_args(1..))
                 .arg(flag("clear")),
         )
         .subcommand(
             Command::new("input")
-                .about("Set pane input routing")
+                .about(t!("cli.pane_input_about").to_string())
                 .arg(Arg::new("pane_id").value_name("PANE_ID"))
                 .args(current_pane_args())
                 .arg(
@@ -550,7 +579,7 @@ fn pane_command() -> Command {
         )
         .subcommand(
             Command::new("split")
-                .about("Split a pane")
+                .about(t!("cli.pane_split_about").to_string())
                 .arg(Arg::new("pane_id").value_name("PANE_ID"))
                 .args(current_pane_args())
                 .arg(split_direction_option())
@@ -563,7 +592,7 @@ fn pane_command() -> Command {
         )
         .subcommand(
             Command::new("swap")
-                .about("Swap panes")
+                .about(t!("cli.pane_swap_about").to_string())
                 .arg(direction_option())
                 .args(current_pane_args())
                 .arg(option("source-pane", "ID"))
@@ -571,7 +600,7 @@ fn pane_command() -> Command {
         )
         .subcommand(
             Command::new("move")
-                .about("Move a pane")
+                .about(t!("cli.pane_move_about").to_string())
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(option("tab", "TAB_ID"))
                 .arg(option("split", "DIRECTION").value_parser(["right", "down"]))
@@ -585,10 +614,10 @@ fn pane_command() -> Command {
                 .arg(flag("focus"))
                 .arg(flag("no-focus")),
         )
-        .subcommand(id_command("close", "pane_id", "Close a pane"))
+        .subcommand(id_command("close", "pane_id", t!("cli.pane_close_about").to_string()))
         .subcommand(
             Command::new("send-text")
-                .about("Send literal text to a pane")
+                .about(t!("cli.pane_send_text_about").to_string())
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(required("text", "TEXT"))
                 .after_help(
@@ -597,31 +626,31 @@ fn pane_command() -> Command {
         )
         .subcommand(
             Command::new("send-keys")
-                .about("Send key presses to a pane")
+                .about(t!("cli.pane_send_keys_about").to_string())
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(required("key", "KEY").num_args(1..))
                 .after_help("Use esc as the canonical Escape key name; escape is also accepted."),
         )
         .subcommand(
             Command::new("wait-output")
-                .about("Wait for matching pane output")
+                .about(t!("cli.wait_output_about").to_string())
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(
                     option("match", "TEXT")
                         .conflicts_with("regex")
                         .required_unless_present("regex")
-                        .help("Match a literal substring"),
+                        .help(t!("cli.pane_match_literal_help").to_string()),
                 )
                 .arg(
                     option("regex", "PATTERN")
                         .conflicts_with("match")
                         .required_unless_present("match")
-                        .help("Match a Rust regular expression"),
+                        .help(t!("cli.pane_match_regex_help").to_string()),
                 )
                 .arg(read_source_option(false))
-                .arg(option("lines", "N").help("Restrict the searched snapshot to N lines"))
-                .arg(option("timeout", "MS").help("Fail after this many milliseconds"))
-                .arg(flag("raw").help("Keep ANSI escape sequences while matching"))
+                .arg(option("lines", "N").help(t!("cli.pane_match_lines_help").to_string()))
+                .arg(option("timeout", "MS").help(t!("cli.agent_wait_timeout_help").to_string()))
+                .arg(flag("raw").help(t!("cli.pane_match_raw_help").to_string()))
                 .group(
                     ArgGroup::new("matcher")
                         .args(["match", "regex"])
@@ -633,7 +662,7 @@ fn pane_command() -> Command {
         )
         .subcommand(
             Command::new("run")
-                .about("Run a command in a pane")
+                .about(t!("cli.pane_run_about").to_string())
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(required("command", "COMMAND").num_args(1..)),
         )
@@ -645,7 +674,7 @@ fn pane_command() -> Command {
 
 fn report_agent_command() -> Command {
     Command::new("report-agent")
-        .about("Report pane agent lifecycle state")
+        .about(t!("cli.pane_report_agent_about").to_string())
         .arg(required("pane_id", "PANE_ID"))
         .arg(option("source", "ID").required(true))
         .arg(option("agent", "LABEL").required(true))
@@ -658,7 +687,7 @@ fn report_agent_command() -> Command {
 
 fn report_agent_session_command() -> Command {
     Command::new("report-agent-session")
-        .about("Report pane agent session identity")
+        .about(t!("cli.pane_report_agent_session_about").to_string())
         .arg(required("pane_id", "PANE_ID"))
         .arg(option("source", "ID").required(true))
         .arg(option("agent", "LABEL").required(true))
@@ -670,7 +699,7 @@ fn report_agent_session_command() -> Command {
 
 fn release_agent_command() -> Command {
     Command::new("release-agent")
-        .about("Release pane agent lifecycle authority")
+        .about(t!("cli.pane_release_agent_about").to_string())
         .arg(required("pane_id", "PANE_ID"))
         .arg(option("source", "ID").required(true))
         .arg(option("agent", "LABEL").required(true))
@@ -679,7 +708,7 @@ fn release_agent_command() -> Command {
 
 fn report_metadata_command() -> Command {
     Command::new("report-metadata")
-        .about("Report display-only pane metadata")
+        .about(t!("cli.pane_report_metadata_about").to_string())
         .arg(required("pane_id", "PANE_ID"))
         .arg(option("source", "ID").required(true))
         .arg(option("agent", "LABEL"))
@@ -698,19 +727,19 @@ fn report_metadata_command() -> Command {
 
 fn terminal_command() -> Command {
     Command::new("terminal")
-        .about("Attach to or observe raw terminal streams")
+        .about(t!("cli.terminal_about").to_string())
         .subcommand(
             Command::new("attach")
-                .about("Attach directly to a terminal stream")
+                .about(t!("cli.terminal_attach_about").to_string())
                 .arg(required("terminal_id", "TERMINAL_ID"))
                 .arg(flag("takeover")),
         )
         .subcommand(
             Command::new("session")
-                .about("Work with terminal sessions")
+                .about(t!("cli.terminal_session_about").to_string())
                 .subcommand(
                     Command::new("control")
-                        .about("Control a terminal stream")
+                        .about(t!("cli.terminal_control_about").to_string())
                         .arg(required("target", "TARGET"))
                         .arg(flag("takeover"))
                         .arg(option("cols", "N"))
@@ -718,7 +747,7 @@ fn terminal_command() -> Command {
                 )
                 .subcommand(
                     Command::new("observe")
-                        .about("Observe a terminal stream")
+                        .about(t!("cli.terminal_observe_about").to_string())
                         .arg(required("target", "TARGET"))
                         .arg(option("cols", "N"))
                         .arg(option("rows", "N")),
@@ -726,34 +755,40 @@ fn terminal_command() -> Command {
         )
         .subcommand(
             Command::new("title")
-                .about("Manage the outer terminal title")
+                .about(t!("cli.terminal_title_about").to_string())
                 .subcommand(
                     Command::new("set")
-                        .about("Set the outer terminal title")
+                        .about(t!("cli.terminal_set_about").to_string())
                         .arg(required("title", "TITLE")),
                 )
-                .subcommand(Command::new("clear").about("Clear the outer terminal title")),
+                .subcommand(
+                    Command::new("clear").about(t!("cli.terminal_clear_about").to_string()),
+                ),
         )
 }
 
 fn session_command() -> Command {
     Command::new("session")
-        .about("Manage named persistent sessions")
-        .subcommand(Command::new("list").about("List sessions").arg(json_flag()))
+        .about(t!("cli.session_about").to_string())
+        .subcommand(
+            Command::new("list")
+                .about(t!("cli.session_list_about").to_string())
+                .arg(json_flag()),
+        )
         .subcommand(
             Command::new("attach")
-                .about("Attach to a session")
+                .about(t!("cli.session_attach_about").to_string())
                 .arg(required("name", "NAME")),
         )
         .subcommand(
             Command::new("stop")
-                .about("Stop a session")
+                .about(t!("cli.session_stop_about").to_string())
                 .arg(required("name", "NAME"))
                 .arg(json_flag()),
         )
         .subcommand(
             Command::new("delete")
-                .about("Delete a stopped session")
+                .about(t!("cli.session_delete_about").to_string())
                 .arg(required("name", "NAME"))
                 .arg(json_flag()),
         )
@@ -761,30 +796,30 @@ fn session_command() -> Command {
 
 fn integration_command() -> Command {
     Command::new("integration")
-        .about("Manage built-in agent integrations")
+        .about(t!("cli.integration_about").to_string())
         .subcommand(
             Command::new("install")
-                .about("Install an integration")
+                .about(t!("cli.integration_install_about").to_string())
                 .arg(integration_target_arg()),
         )
         .subcommand(
             Command::new("uninstall")
-                .about("Uninstall an integration")
+                .about(t!("cli.integration_uninstall_about").to_string())
                 .arg(integration_target_arg()),
         )
         .subcommand(
             Command::new("status")
-                .about("Show integration status")
+                .about(t!("cli.integration_status_about").to_string())
                 .arg(flag("outdated-only")),
         )
 }
 
 fn plugin_command() -> Command {
     Command::new("plugin")
-        .about("Install and run workflow plugins")
+        .about(t!("cli.plugin_about").to_string())
         .subcommand(
             Command::new("install")
-                .about("Install a plugin from GitHub")
+                .about(t!("cli.plugin_install_about").to_string())
                 .arg(required("source", "OWNER/REPO[/SUBDIR]"))
                 .arg(option("ref", "REF"))
                 .arg(
@@ -796,74 +831,74 @@ fn plugin_command() -> Command {
         )
         .subcommand(
             Command::new("uninstall")
-                .about("Uninstall a plugin")
+                .about(t!("cli.plugin_uninstall_about").to_string())
                 .arg(required("plugin", "PLUGIN")),
         )
         .subcommand(
             Command::new("link")
-                .about("Link a local plugin")
+                .about(t!("cli.plugin_link_about").to_string())
                 .arg(path_arg("path", "PATH"))
                 .arg(flag("disabled"))
                 .arg(flag("enabled")),
         )
         .subcommand(
             Command::new("unlink")
-                .about("Unlink a local plugin")
+                .about(t!("cli.plugin_unlink_about").to_string())
                 .arg(required("plugin_id", "PLUGIN_ID")),
         )
         .subcommand(
             Command::new("enable")
-                .about("Enable a plugin")
+                .about(t!("cli.plugin_enable_about").to_string())
                 .arg(required("plugin_id", "PLUGIN_ID")),
         )
         .subcommand(
             Command::new("disable")
-                .about("Disable a plugin")
+                .about(t!("cli.plugin_disable_about").to_string())
                 .arg(required("plugin_id", "PLUGIN_ID")),
         )
         .subcommand(
             Command::new("list")
-                .about("List installed plugins")
+                .about(t!("cli.plugin_list_about").to_string())
                 .arg(option("plugin", "ID"))
                 .arg(json_flag()),
         )
         .subcommand(
             Command::new("config-dir")
-                .about("Print a plugin config directory")
+                .about(t!("cli.plugin_config_dir_about").to_string())
                 .arg(required("plugin_id", "PLUGIN_ID")),
         )
         .subcommand(
             Command::new("action")
-                .about("List or invoke plugin actions")
+                .about(t!("cli.plugin_action_about").to_string())
                 .subcommand(
                     Command::new("list")
-                        .about("List plugin actions")
+                        .about(t!("cli.plugin_action_list_about").to_string())
                         .arg(option("plugin", "ID")),
                 )
                 .subcommand(
                     Command::new("invoke")
-                        .about("Invoke a plugin action")
+                        .about(t!("cli.plugin_action_invoke_about").to_string())
                         .arg(required("action_id", "ACTION_ID"))
                         .arg(option("plugin", "ID")),
                 ),
         )
         .subcommand(
             Command::new("log")
-                .about("Inspect plugin command logs")
+                .about(t!("cli.plugin_log_about").to_string())
                 .visible_alias("logs")
                 .subcommand(
                     Command::new("list")
-                        .about("List plugin command logs")
+                        .about(t!("cli.plugin_log_list_about").to_string())
                         .arg(option("plugin", "ID"))
                         .arg(option("limit", "N")),
                 ),
         )
         .subcommand(
             Command::new("pane")
-                .about("Manage plugin-owned panes")
+                .about(t!("cli.plugin_pane_about").to_string())
                 .subcommand(
                     Command::new("open")
-                        .about("Open a plugin pane")
+                        .about(t!("cli.plugin_pane_open_about").to_string())
                         .arg(option("plugin", "ID"))
                         .arg(option("entrypoint", "ID"))
                         .arg(
@@ -880,12 +915,12 @@ fn plugin_command() -> Command {
                 )
                 .subcommand(
                     Command::new("focus")
-                        .about("Focus a plugin pane")
+                        .about(t!("cli.plugin_pane_focus_about").to_string())
                         .arg(required("pane_id", "PANE_ID")),
                 )
                 .subcommand(
                     Command::new("close")
-                        .about("Close a plugin pane")
+                        .about(t!("cli.plugin_pane_close_about").to_string())
                         .arg(required("pane_id", "PANE_ID")),
                 ),
         )
@@ -909,7 +944,7 @@ fn integration_target_values() -> Vec<&'static str> {
         .collect()
 }
 
-fn id_command(name: &'static str, id: &'static str, about: &'static str) -> Command {
+fn id_command(name: &'static str, id: &'static str, about: String) -> Command {
     Command::new(name).about(about).arg(required(id, id))
 }
 
@@ -959,13 +994,13 @@ fn help_flag() -> Arg {
         .short('h')
         .long("help")
         .action(ArgAction::SetTrue)
-        .help("Show help")
+        .help(t!("cli.help_help").to_string())
 }
 
 fn env_option() -> Arg {
     option("env", "KEY=VALUE")
         .action(ArgAction::Append)
-        .help("Set an environment variable for the launched process")
+        .help(t!("cli.env_help").to_string())
 }
 
 fn flag(name: &'static str) -> Arg {
@@ -998,6 +1033,7 @@ fn path_arg(name: &'static str, value_name: &'static str) -> Arg {
 #[cfg(test)]
 mod tests {
     use clap::{Arg, Command};
+    use rust_i18n::t;
 
     fn command_path<'a>(cmd: &'a Command, path: &[&str]) -> &'a Command {
         let mut current = cmd;

@@ -165,7 +165,7 @@ fn release_notes_preview_line_entries<'a>(
                     "●",
                     Style::default().fg(p.accent).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(" update ready", title_style),
+                Span::styled(rust_i18n::t!("menu.update_ready").to_string(), title_style),
             ]),
         ),
         (instruction_width + 1, Line::from(instruction_spans)),

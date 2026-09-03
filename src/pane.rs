@@ -43,6 +43,8 @@ use self::agent_detection::{
     AGENT_PENDING_IDLE_RECHECK, AGENT_STARTUP_GRACE_WINDOW,
 };
 pub(crate) use self::state::{legacy_origin_workspace_id, untrusted_legacy_origin_workspace_label};
+#[cfg(any(unix, test))]
+pub use self::terminal::InputState;
 use self::terminal::{GhosttyPaneTerminal, PaneTerminal};
 pub(crate) use self::terminal::{
     TerminalDirtyPatch, TerminalDirtyPatchOutcome, TerminalReadSnapshot, TerminalTextMatch,
@@ -50,7 +52,7 @@ pub(crate) use self::terminal::{
 };
 pub use self::{
     state::PaneState,
-    terminal::{ScrollMetrics, TerminalCursorState, InputState},
+    terminal::{ScrollMetrics, TerminalCursorState},
 };
 
 const RELEASE_REACQUIRE_SUPPRESSION: std::time::Duration = std::time::Duration::from_secs(1);

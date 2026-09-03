@@ -270,7 +270,7 @@ impl ClientShellState {
                     .map(|workspace| workspace.label.clone());
                 if let Some(label) = label {
                     self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
-                        title: "rename workspace",
+                        title: rust_i18n::t!("dialog.rename_workspace").to_string(),
                         input: label,
                         replace_on_type: false,
                         target: ClientRenameTarget::Workspace { workspace_id },
@@ -353,7 +353,7 @@ impl ClientShellState {
                         + 1)
                     .to_string();
                     self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
-                        title: "new tab",
+                        title: rust_i18n::t!("dialog.new_tab").to_string(),
                         input: default_name.clone(),
                         replace_on_type: true,
                         target: ClientRenameTarget::NewTab {
@@ -381,7 +381,7 @@ impl ClientShellState {
                     .and_then(|snapshot| snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id));
                 if let Some(tab) = tab {
                     self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
-                        title: "rename tab",
+                        title: rust_i18n::t!("dialog.rename_tab").to_string(),
                         input: tab.label.clone(),
                         replace_on_type: false,
                         target: ClientRenameTarget::Tab {
@@ -423,7 +423,7 @@ impl ClientShellState {
                         .and_then(|pane| pane.label.clone())
                 });
                 self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
-                    title: "rename pane",
+                    title: rust_i18n::t!("dialog.rename_pane").to_string(),
                     input: label.clone().unwrap_or_default(),
                     replace_on_type: label.is_none(),
                     target: ClientRenameTarget::Pane { pane_id },

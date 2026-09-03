@@ -113,7 +113,7 @@ fn modal_paste_shortcut_modifiers_are_platform_specific() {
 fn modal_paste_inserts_clipboard_text_through_overlay_text_path() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
-        title: "rename pane",
+        title: "rename pane".to_owned(),
         input: "replace me".into(),
         replace_on_type: true,
         target: ClientRenameTarget::Pane {

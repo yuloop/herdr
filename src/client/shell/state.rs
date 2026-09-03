@@ -352,7 +352,7 @@ pub(super) enum ClientRenameTarget {
 
 #[derive(Debug)]
 pub(super) struct ClientRenameOverlay {
-    pub(super) title: &'static str,
+    pub(super) title: String,
     pub(super) input: String,
     pub(super) replace_on_type: bool,
     pub(super) target: ClientRenameTarget,

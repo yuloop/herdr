@@ -12,7 +12,7 @@ pub(super) fn render_worktree_create_overlay(
         inner.x,
         inner.y,
         inner.width,
-        "new worktree",
+        &rust_i18n::t!("dialog.new_worktree").to_string(),
         Style::default()
             .fg(p.text)
             .bg(p.panel_bg)
@@ -23,7 +23,7 @@ pub(super) fn render_worktree_create_overlay(
         inner.x,
         inner.y + 2,
         inner.width,
-        " branch",
+        &rust_i18n::t!("dialog.branch").to_string(),
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
     let input = Rect::new(inner.x, inner.y + 3, inner.width, 1);
@@ -41,7 +41,7 @@ pub(super) fn render_worktree_create_overlay(
         inner.x,
         inner.y + 5,
         inner.width,
-        " checkout",
+        &rust_i18n::t!("dialog.checkout").to_string(),
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
     put_text(
@@ -58,7 +58,7 @@ pub(super) fn render_worktree_create_overlay(
             inner.x,
             inner.y + 8,
             inner.width,
-            " creating…",
+            &rust_i18n::t!("dialog.creating").to_string(),
             Style::default().fg(p.accent).bg(p.panel_bg),
         );
     } else if let Some(error) = create.error.as_deref() {
@@ -78,7 +78,7 @@ pub(super) fn render_worktree_create_overlay(
     button(
         b,
         *primary,
-        " ↵ create and open ",
+        &format!(" ↵ {} ", rust_i18n::t!("dialog.create_open")),
         Style::default()
             .fg(contrast(p))
             .bg(p.accent)
@@ -87,7 +87,7 @@ pub(super) fn render_worktree_create_overlay(
     button(
         b,
         *cancel,
-        " esc cancel ",
+        &format!(" esc {} ", rust_i18n::t!("common.cancel")),
         Style::default()
             .fg(p.text)
             .bg(p.surface0)
@@ -125,7 +125,7 @@ pub(super) fn render_worktree_open_overlay(
         inner.x,
         inner.y,
         inner.width,
-        "open worktree",
+        &rust_i18n::t!("dialog.open_worktree").to_string(),
         Style::default()
             .fg(p.text)
             .bg(p.panel_bg)
@@ -141,7 +141,7 @@ pub(super) fn render_worktree_open_overlay(
         &if open.search_focused || !open.query.is_empty() {
             format!(" / {}", open.query)
         } else {
-            " / filter worktrees".to_owned()
+            format!(" / {}", rust_i18n::t!("dialog.filter_worktrees"))
         },
         Style::default()
             .fg(if open.search_focused {
@@ -152,9 +152,14 @@ pub(super) fn render_worktree_open_overlay(
             .bg(p.panel_bg),
     );
     let count = if filtered.len() == open.entries.len() {
-        format!("{} checkouts", open.entries.len())
+        rust_i18n::t!("dialog.checkouts_count", count = open.entries.len()).to_string()
     } else {
-        format!("{}/{} checkouts", filtered.len(), open.entries.len())
+        rust_i18n::t!(
+            "dialog.checkouts_filtered",
+            filtered = filtered.len(),
+            total = open.entries.len()
+        )
+        .to_string()
     };
     put_right_text(
         b,
@@ -234,7 +239,7 @@ pub(super) fn render_worktree_open_overlay(
             body.x,
             body.y,
             body.width,
-            " no matching worktrees",
+            &rust_i18n::t!("dialog.no_matching_worktrees").to_string(),
             Style::default().fg(p.overlay0).bg(p.panel_bg),
         );
     }
@@ -244,7 +249,7 @@ pub(super) fn render_worktree_open_overlay(
             inner.x,
             inner.bottom() - 3,
             inner.width,
-            " opening…",
+            &rust_i18n::t!("dialog.opening").to_string(),
             Style::default().fg(p.accent).bg(p.panel_bg),
         );
     } else if let Some(error) = open.error.as_deref() {
@@ -264,7 +269,7 @@ pub(super) fn render_worktree_open_overlay(
     button(
         b,
         *primary,
-        " ↵ open ",
+        &format!(" ↵ {} ", rust_i18n::t!("dialog.open")),
         Style::default()
             .fg(contrast(p))
             .bg(p.accent)
@@ -273,7 +278,7 @@ pub(super) fn render_worktree_open_overlay(
     button(
         b,
         *cancel,
-        " esc cancel ",
+        &format!(" esc {} ", rust_i18n::t!("common.cancel")),
         Style::default()
             .fg(p.text)
             .bg(p.surface0)
@@ -310,7 +315,7 @@ pub(super) fn render_worktree_remove_overlay(
         inner.x,
         inner.y,
         inner.width,
-        " delete worktree checkout?",
+        &rust_i18n::t!("dialog.delete_worktree_title").to_string(),
         Style::default()
             .fg(p.red)
             .bg(p.panel_bg)
@@ -321,7 +326,7 @@ pub(super) fn render_worktree_remove_overlay(
         inner.x,
         inner.y + 1,
         inner.width,
-        " This removes the checkout folder:",
+        &rust_i18n::t!("dialog.removes_folder").to_string(),
         Style::default().fg(p.text).bg(p.panel_bg),
     );
     put_text(
@@ -337,7 +342,7 @@ pub(super) fn render_worktree_remove_overlay(
         inner.x,
         inner.y + 3,
         inner.width,
-        " The branch is not deleted. The Herdr workspace will close.",
+        &rust_i18n::t!("dialog.branch_not_deleted").to_string(),
         Style::default().fg(p.text).bg(p.panel_bg),
     );
     if remove.force_confirmation {
@@ -346,7 +351,7 @@ pub(super) fn render_worktree_remove_overlay(
             inner.x,
             inner.y + 4,
             inner.width,
-            " Dirty or untracked files will be permanently deleted.",
+            &rust_i18n::t!("dialog.dirty_warning").to_string(),
             Style::default().fg(p.red).bg(p.panel_bg),
         );
     }
@@ -356,7 +361,7 @@ pub(super) fn render_worktree_remove_overlay(
             inner.x,
             inner.y + 5,
             inner.width,
-            " removing…",
+            &rust_i18n::t!("dialog.removing").to_string(),
             Style::default().fg(p.accent).bg(p.panel_bg),
         );
     } else if let Some(error) = remove.error.as_deref() {
@@ -376,10 +381,10 @@ pub(super) fn render_worktree_remove_overlay(
     button(
         b,
         *primary,
-        if remove.force_confirmation {
-            " ↵ delete anyway "
+        &if remove.force_confirmation {
+            format!(" ↵ {} ", rust_i18n::t!("dialog.delete_anyway"))
         } else {
-            " ↵ remove "
+            format!(" ↵ {} ", rust_i18n::t!("dialog.remove"))
         },
         Style::default()
             .fg(contrast(p))
@@ -389,7 +394,7 @@ pub(super) fn render_worktree_remove_overlay(
     button(
         b,
         *cancel,
-        " esc cancel ",
+        &format!(" esc {} ", rust_i18n::t!("common.cancel")),
         Style::default()
             .fg(p.text)
             .bg(p.surface0)

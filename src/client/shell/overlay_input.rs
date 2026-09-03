@@ -311,7 +311,7 @@ impl ClientShellState {
             .map(crate::workspace::derive_label_from_cwd)
             .unwrap_or_else(|| "workspace".to_owned());
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
-            title: "new workspace",
+            title: rust_i18n::t!("dialog.new_workspace").to_string(),
             input: suggested_name.clone(),
             replace_on_type: true,
             target: ClientRenameTarget::NewWorkspace {
@@ -337,7 +337,7 @@ impl ClientShellState {
             return;
         };
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
-            title: "rename workspace",
+            title: rust_i18n::t!("dialog.rename_workspace").to_string(),
             input: workspace.label.clone(),
             replace_on_type: false,
             target: ClientRenameTarget::Workspace { workspace_id },
@@ -359,7 +359,7 @@ impl ClientShellState {
             + 1)
         .to_string();
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
-            title: "new tab",
+            title: rust_i18n::t!("dialog.new_tab").to_string(),
             input: default_name.clone(),
             replace_on_type: true,
             target: ClientRenameTarget::NewTab {
@@ -380,7 +380,7 @@ impl ClientShellState {
             return;
         };
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
-            title: "rename tab",
+            title: rust_i18n::t!("dialog.rename_tab").to_string(),
             input: tab.label.clone(),
             replace_on_type: false,
             target: ClientRenameTarget::Tab {
@@ -402,7 +402,7 @@ impl ClientShellState {
             return;
         };
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
-            title: "rename pane",
+            title: rust_i18n::t!("dialog.rename_pane").to_string(),
             input: pane.label.clone().unwrap_or_default(),
             replace_on_type: pane.label.is_none(),
             target: ClientRenameTarget::Pane {
@@ -1066,23 +1066,29 @@ impl ClientShellState {
                     .count()
             })
             .sum::<usize>();
-        let panes = if pane_count == 1 {
-            "1 pane".to_owned()
+        let pane_text = if pane_count == 1 {
+            rust_i18n::t!("dialog.one_pane").to_string()
         } else {
-            format!("{pane_count} panes")
+            rust_i18n::t!("dialog.panes_count", count = pane_count).to_string()
         };
-        let scope = if closes_group {
-            format!("{} workspaces, {panes}", group.len())
+        let workspace_text = if closes_group {
+            let count = group.len();
+            if count == 1 {
+                rust_i18n::t!("dialog.one_workspace").to_string()
+            } else {
+                rust_i18n::t!("dialog.workspaces_count", count = count).to_string()
+            }
         } else {
-            panes
+            String::new()
         };
+        let scope = format!("{workspace_text}{pane_text}");
         self.overlay = Some(ClientShellOverlay::ConfirmClose(
             ClientConfirmCloseOverlay {
                 workspace_id,
                 title: if closes_group {
-                    "Close worktree group?".to_owned()
+                    rust_i18n::t!("dialog.close_group_title").to_string()
                 } else {
-                    "Close workspace?".to_owned()
+                    rust_i18n::t!("dialog.close_workspace_title").to_string()
                 },
                 detail: format!("{} — {scope}", workspace.label),
             },

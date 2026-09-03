@@ -333,6 +333,7 @@ dialog:
   branch_not_deleted: " 分支不会被删除。Herdr 工作区将被关闭。"
   dirty_warning: " 脏文件或未跟踪文件将被永久删除。"
   removing: " 移除中…"
+  opening: " 打开中…"
   open_worktree: "打开工作树"
   open: "打开"
   filter_worktrees: "筛选工作树"

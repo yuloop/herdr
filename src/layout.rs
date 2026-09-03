@@ -70,6 +70,7 @@ pub enum NavDirection {
 }
 
 /// A node in the BSP tree. Public for serialization.
+#[derive(Debug, Clone)]
 pub enum Node {
     Pane(PaneId),
     Split {
@@ -81,6 +82,7 @@ pub enum Node {
 }
 
 /// BSP tiling layout. Tracks a tree of splits and a focused pane.
+#[derive(Debug, Clone)]
 pub struct TileLayout {
     root: Node,
     focus: PaneId,

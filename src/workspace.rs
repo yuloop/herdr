@@ -8,9 +8,7 @@ use ratatui::layout::Direction;
 use tokio::sync::{mpsc, Notify};
 
 use crate::events::AppEvent;
-use crate::layout::PaneId;
-#[cfg(test)]
-use crate::layout::TileLayout;
+use crate::layout::{PaneId, TileLayout};
 use crate::pane::{PaneLaunchEnv, PaneState};
 use crate::render_signal::RenderSignal;
 use crate::terminal::{TerminalId, TerminalRuntime, TerminalRuntimeRegistry, TerminalState};
@@ -898,24 +896,91 @@ impl Workspace {
 
     pub(crate) fn take_pane_for_move(&mut self, pane_id: PaneId) -> Option<TakenPane> {
         let tab_idx = self.find_tab_index_for_pane(pane_id)?;
+        let source_active_tab = self.active_tab;
+        let source_public_pane_number = self.public_pane_number(pane_id)?;
         let pane_count = self.tabs[tab_idx].layout.pane_count();
         if pane_count <= 1 {
             let mut tab = self.tabs.remove(tab_idx);
-            let moved = tab.take_pane_for_move(pane_id)?;
+            let zoomed = tab.zoomed;
+            let Some(moved) = tab.take_pane_for_move(pane_id) else {
+                self.tabs.insert(tab_idx, tab);
+                self.active_tab = source_active_tab;
+                return None;
+            };
+            tab.zoomed = zoomed;
             self.adjust_active_tab_after_removal(tab_idx);
             return Some(TakenPane {
                 moved,
-                removed_tab_idx: Some(tab_idx),
+                restore: PaneMoveRestoreToken {
+                    source_tab: PaneSourceTabRestore::Removed {
+                        tab_idx,
+                        tab: Box::new(tab),
+                    },
+                    source_active_tab,
+                    source_public_pane_number,
+                },
                 workspace_empty: self.tabs.is_empty(),
             });
         }
 
-        let moved = self.tabs[tab_idx].take_pane_for_move(pane_id)?;
+        let layout = self.tabs[tab_idx].layout.clone();
+        let root_pane = self.tabs[tab_idx].root_pane;
+        let zoomed = self.tabs[tab_idx].zoomed;
+        let Some(moved) = self.tabs[tab_idx].take_pane_for_move(pane_id) else {
+            self.tabs[tab_idx].layout = layout;
+            self.tabs[tab_idx].root_pane = root_pane;
+            self.tabs[tab_idx].zoomed = zoomed;
+            return None;
+        };
         Some(TakenPane {
             moved,
-            removed_tab_idx: None,
+            restore: PaneMoveRestoreToken {
+                source_tab: PaneSourceTabRestore::Retained {
+                    tab_idx,
+                    layout,
+                    root_pane,
+                    zoomed,
+                },
+                source_active_tab,
+                source_public_pane_number,
+            },
             workspace_empty: false,
         })
+    }
+
+    pub(crate) fn restore_moved_pane(
+        &mut self,
+        token: PaneMoveRestoreToken,
+        moved: MovedPane,
+    ) -> Result<(), MovedPane> {
+        let pane_id = moved.pane_id;
+        match token.source_tab {
+            PaneSourceTabRestore::Retained {
+                tab_idx,
+                layout,
+                root_pane,
+                zoomed,
+            } => {
+                let Some(tab) = self.tabs.get_mut(tab_idx) else {
+                    return Err(moved);
+                };
+                tab.restore_moved_pane(moved)?;
+                tab.layout = layout;
+                tab.root_pane = root_pane;
+                tab.zoomed = zoomed;
+            }
+            PaneSourceTabRestore::Removed { tab_idx, mut tab } => {
+                if tab_idx > self.tabs.len() {
+                    return Err(moved);
+                }
+                tab.restore_moved_pane(moved)?;
+                self.tabs.insert(tab_idx, *tab);
+            }
+        }
+        self.active_tab = token.source_active_tab;
+        self.public_pane_numbers
+            .insert(pane_id, token.source_public_pane_number);
+        Ok(())
     }
 
     pub(crate) fn insert_moved_pane_into_tab(
@@ -1163,9 +1228,37 @@ impl Workspace {
     }
 }
 
+pub(crate) enum PaneSourceTabRestore {
+    Retained {
+        tab_idx: usize,
+        layout: TileLayout,
+        root_pane: PaneId,
+        zoomed: bool,
+    },
+    Removed {
+        tab_idx: usize,
+        tab: Box<Tab>,
+    },
+}
+
+pub(crate) struct PaneMoveRestoreToken {
+    source_tab: PaneSourceTabRestore,
+    source_active_tab: usize,
+    source_public_pane_number: usize,
+}
+
+impl PaneMoveRestoreToken {
+    pub(crate) fn removed_tab_idx(&self) -> Option<usize> {
+        match self.source_tab {
+            PaneSourceTabRestore::Retained { .. } => None,
+            PaneSourceTabRestore::Removed { tab_idx, .. } => Some(tab_idx),
+        }
+    }
+}
+
 pub(crate) struct TakenPane {
     pub moved: MovedPane,
-    pub removed_tab_idx: Option<usize>,
+    pub restore: PaneMoveRestoreToken,
     pub workspace_empty: bool,
 }
 

@@ -1119,7 +1119,7 @@ impl App {
             Some(taken) => taken,
             None => return encode_error(id, "pane_move_failed", "source pane could not be moved"),
         };
-        let source_removed_tab_id = taken.removed_tab_idx.map(|_| previous_tab_id.clone());
+        let source_removed_tab_id = taken.restore.removed_tab_idx().map(|_| previous_tab_id.clone());
         let source_workspace_empty = taken.workspace_empty;
         let moved = taken.moved;
         let cross_workspace = match &resolved {

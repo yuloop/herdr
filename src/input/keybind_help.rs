@@ -8,7 +8,7 @@ use crate::{
 };
 
 pub(crate) type KeybindHelpEntry = (String, Cow<'static, str>);
-pub(crate) type KeybindHelpGroup = (&'static str, Vec<KeybindHelpEntry>);
+pub(crate) type KeybindHelpGroup = (Cow<'static, str>, Vec<KeybindHelpEntry>);
 
 pub(crate) fn keybind_help_text_char(key: &TerminalKey) -> Option<char> {
     if !key.modifiers.difference(KeyModifiers::SHIFT).is_empty() {
@@ -23,17 +23,19 @@ pub(crate) fn keybind_help_text_char(key: &TerminalKey) -> Option<char> {
     Some(character)
 }
 
-fn entry(key: impl Into<String>, label: &'static str) -> KeybindHelpEntry {
-    (key.into(), Cow::Borrowed(label))
+fn entry(key: impl Into<String>, label: Cow<'static, str>) -> KeybindHelpEntry {
+    (key.into(), label)
 }
 
 fn binding_label(bindings: &ActionKeybinds) -> String {
-    bindings.label().unwrap_or_else(|| "unset".to_owned())
+    bindings
+        .label()
+        .unwrap_or_else(|| rust_i18n::t!("common.unset").to_string())
 }
 
 fn indexed_label(bindings: &[IndexedKeybind]) -> String {
     if bindings.is_empty() {
-        return "unset".to_owned();
+        return rust_i18n::t!("common.unset").to_string();
     }
     let mut parts = Vec::new();
     let mut index = 0;
@@ -67,30 +69,50 @@ pub(crate) fn keybind_help_groups(
 ) -> Vec<KeybindHelpGroup> {
     let mut groups = vec![
         (
-            "global",
+            Cow::Owned(rust_i18n::t!("keybind.group_global").to_string()),
             vec![
-                entry(crate::config::format_key_combo(prefix), "prefix mode"),
-                entry(binding_label(&keybinds.help), "keybinds"),
-                entry(binding_label(&keybinds.settings), "settings"),
-                entry(binding_label(&keybinds.detach), "detach"),
-                entry(binding_label(&keybinds.reload_config), "reload config"),
+                entry(
+                    crate::config::format_key_combo(prefix),
+                    Cow::Owned(rust_i18n::t!("keybind.prefix_mode").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.help),
+                    Cow::Owned(rust_i18n::t!("keybind.keybinds").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.settings),
+                    Cow::Owned(rust_i18n::t!("keybind.settings").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.detach),
+                    Cow::Owned(rust_i18n::t!("keybind.detach").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.reload_config),
+                    Cow::Owned(rust_i18n::t!("keybind.reload_config").to_string()),
+                ),
                 entry(
                     binding_label(&keybinds.open_notification_target),
-                    "open notification target",
+                    Cow::Owned(
+                        rust_i18n::t!("keybind.open_notification_target").to_string(),
+                    ),
                 ),
             ],
         ),
         (
-            "navigation",
+            Cow::Owned(rust_i18n::t!("keybind.group_navigation").to_string()),
             vec![
-                entry("esc", "back"),
+                entry(
+                    "esc",
+                    Cow::Owned(rust_i18n::t!("keybind.back").to_string()),
+                ),
                 entry(
                     format!(
                         "{} / {}",
                         binding_label(&keybinds.navigate.workspace_up),
                         binding_label(&keybinds.navigate.workspace_down)
                     ),
-                    "workspace list",
+                    Cow::Owned(rust_i18n::t!("keybind.workspace_list").to_string()),
                 ),
                 entry(
                     format!(
@@ -100,103 +122,207 @@ pub(crate) fn keybind_help_groups(
                         binding_label(&keybinds.navigate.pane_up),
                         binding_label(&keybinds.navigate.pane_right)
                     ),
-                    "move focus",
+                    Cow::Owned(rust_i18n::t!("keybind.move_focus").to_string()),
                 ),
-                entry("tab / shift+tab", "cycle pane"),
-                entry("enter", "open workspace"),
-                entry("1..9", "switch workspace"),
+                entry(
+                    "tab / shift+tab",
+                    Cow::Owned(rust_i18n::t!("keybind.cycle_pane").to_string()),
+                ),
+                entry(
+                    "enter",
+                    Cow::Owned(rust_i18n::t!("keybind.open_workspace").to_string()),
+                ),
+                entry(
+                    "1..9",
+                    Cow::Owned(rust_i18n::t!("keybind.switch_workspace").to_string()),
+                ),
             ],
         ),
         (
-            "workspaces / tabs",
+            Cow::Owned(rust_i18n::t!("keybind.group_workspaces").to_string()),
             vec![
                 entry(
                     binding_label(&keybinds.workspace_picker),
-                    "workspace navigation",
+                    Cow::Owned(rust_i18n::t!("keybind.workspace_navigation").to_string()),
                 ),
-                entry(binding_label(&keybinds.goto), "session navigator"),
-                entry(binding_label(&keybinds.new_workspace), "new workspace"),
-                entry(binding_label(&keybinds.new_worktree), "new worktree"),
-                entry(binding_label(&keybinds.open_worktree), "open worktree"),
+                entry(
+                    binding_label(&keybinds.goto),
+                    Cow::Owned(rust_i18n::t!("keybind.session_navigator").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.new_workspace),
+                    Cow::Owned(rust_i18n::t!("keybind.new_workspace").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.new_worktree),
+                    Cow::Owned(rust_i18n::t!("keybind.new_worktree").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.open_worktree),
+                    Cow::Owned(rust_i18n::t!("keybind.open_worktree").to_string()),
+                ),
                 entry(
                     binding_label(&keybinds.remove_worktree),
-                    "delete worktree checkout",
+                    Cow::Owned(
+                        rust_i18n::t!("keybind.delete_worktree_checkout").to_string(),
+                    ),
                 ),
                 entry(
                     binding_label(&keybinds.rename_workspace),
-                    "rename workspace",
+                    Cow::Owned(rust_i18n::t!("keybind.rename_workspace").to_string()),
                 ),
-                entry(binding_label(&keybinds.close_workspace), "close workspace"),
+                entry(
+                    binding_label(&keybinds.close_workspace),
+                    Cow::Owned(rust_i18n::t!("keybind.close_workspace").to_string()),
+                ),
                 entry(
                     binding_label(&keybinds.previous_workspace),
-                    "previous workspace",
+                    Cow::Owned(rust_i18n::t!("keybind.previous_workspace").to_string()),
                 ),
-                entry(binding_label(&keybinds.next_workspace), "next workspace"),
+                entry(
+                    binding_label(&keybinds.next_workspace),
+                    Cow::Owned(rust_i18n::t!("keybind.next_workspace").to_string()),
+                ),
                 entry(
                     indexed_label(&keybinds.switch_workspace),
-                    "switch workspace 1-9",
+                    Cow::Owned(rust_i18n::t!("keybind.switch_workspace_n").to_string()),
                 ),
-                entry(binding_label(&keybinds.previous_agent), "previous agent"),
-                entry(binding_label(&keybinds.next_agent), "next agent"),
-                entry(indexed_label(&keybinds.focus_agent), "focus agent 1-9"),
-                entry(binding_label(&keybinds.new_tab), "new tab"),
-                entry(binding_label(&keybinds.rename_tab), "rename tab"),
-                entry(binding_label(&keybinds.previous_tab), "previous tab"),
-                entry(binding_label(&keybinds.next_tab), "next tab"),
-                entry(binding_label(&keybinds.move_tab_previous), "move tab left"),
-                entry(binding_label(&keybinds.move_tab_next), "move tab right"),
-                entry(indexed_label(&keybinds.switch_tab), "switch tab 1-9"),
-                entry(binding_label(&keybinds.close_tab), "close tab"),
+                entry(
+                    binding_label(&keybinds.previous_agent),
+                    Cow::Owned(rust_i18n::t!("keybind.previous_agent").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.next_agent),
+                    Cow::Owned(rust_i18n::t!("keybind.next_agent").to_string()),
+                ),
+                entry(
+                    indexed_label(&keybinds.focus_agent),
+                    Cow::Owned(rust_i18n::t!("keybind.focus_agent_n").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.new_tab),
+                    Cow::Owned(rust_i18n::t!("keybind.new_tab").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.rename_tab),
+                    Cow::Owned(rust_i18n::t!("keybind.rename_tab").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.previous_tab),
+                    Cow::Owned(rust_i18n::t!("keybind.previous_tab").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.next_tab),
+                    Cow::Owned(rust_i18n::t!("keybind.next_tab").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.move_tab_previous),
+                    Cow::Owned(rust_i18n::t!("keybind.move_tab_left").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.move_tab_next),
+                    Cow::Owned(rust_i18n::t!("keybind.move_tab_right").to_string()),
+                ),
+                entry(
+                    indexed_label(&keybinds.switch_tab),
+                    Cow::Owned(rust_i18n::t!("keybind.switch_tab_n").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.close_tab),
+                    Cow::Owned(rust_i18n::t!("keybind.close_tab").to_string()),
+                ),
             ],
         ),
         (
-            "panes",
+            Cow::Owned(rust_i18n::t!("keybind.group_panes").to_string()),
             vec![
-                entry(binding_label(&keybinds.split_vertical), "split vertical"),
+                entry(
+                    binding_label(&keybinds.split_vertical),
+                    Cow::Owned(rust_i18n::t!("keybind.split_vertical").to_string()),
+                ),
                 entry(
                     binding_label(&keybinds.split_horizontal),
-                    "split horizontal",
+                    Cow::Owned(rust_i18n::t!("keybind.split_horizontal").to_string()),
                 ),
-                entry(binding_label(&keybinds.close_pane), "close pane"),
-                entry(binding_label(&keybinds.rename_pane), "rename pane"),
-                entry(binding_label(&keybinds.edit_scrollback), "edit scrollback"),
-                entry(binding_label(&keybinds.copy_mode), "copy mode"),
-                entry(binding_label(&keybinds.zoom), "zoom pane"),
-                entry(binding_label(&keybinds.resize_mode), "resize mode"),
+                entry(
+                    binding_label(&keybinds.close_pane),
+                    Cow::Owned(rust_i18n::t!("keybind.close_pane").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.rename_pane),
+                    Cow::Owned(rust_i18n::t!("keybind.rename_pane").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.edit_scrollback),
+                    Cow::Owned(rust_i18n::t!("keybind.edit_scrollback").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.copy_mode),
+                    Cow::Owned(rust_i18n::t!("keybind.copy_mode").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.zoom),
+                    Cow::Owned(rust_i18n::t!("keybind.zoom_pane").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.resize_mode),
+                    Cow::Owned(rust_i18n::t!("keybind.resize_mode").to_string()),
+                ),
                 entry(
                     binding_label(&keybinds.resize_pane_left),
-                    "resize pane left",
+                    Cow::Owned(rust_i18n::t!("keybind.resize_pane_left").to_string()),
                 ),
                 entry(
                     binding_label(&keybinds.resize_pane_down),
-                    "resize pane down",
+                    Cow::Owned(rust_i18n::t!("keybind.resize_pane_down").to_string()),
                 ),
-                entry(binding_label(&keybinds.resize_pane_up), "resize pane up"),
+                entry(
+                    binding_label(&keybinds.resize_pane_up),
+                    Cow::Owned(rust_i18n::t!("keybind.resize_pane_up").to_string()),
+                ),
                 entry(
                     binding_label(&keybinds.resize_pane_right),
-                    "resize pane right",
+                    Cow::Owned(rust_i18n::t!("keybind.resize_pane_right").to_string()),
                 ),
-                entry(binding_label(&keybinds.toggle_sidebar), "toggle sidebar"),
-                entry(binding_label(&keybinds.focus_pane_left), "focus pane left"),
-                entry(binding_label(&keybinds.focus_pane_down), "focus pane down"),
-                entry(binding_label(&keybinds.focus_pane_up), "focus pane up"),
+                entry(
+                    binding_label(&keybinds.toggle_sidebar),
+                    Cow::Owned(rust_i18n::t!("keybind.toggle_sidebar").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.focus_pane_left),
+                    Cow::Owned(rust_i18n::t!("keybind.focus_pane_left").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.focus_pane_down),
+                    Cow::Owned(rust_i18n::t!("keybind.focus_pane_down").to_string()),
+                ),
+                entry(
+                    binding_label(&keybinds.focus_pane_up),
+                    Cow::Owned(rust_i18n::t!("keybind.focus_pane_up").to_string()),
+                ),
                 entry(
                     binding_label(&keybinds.focus_pane_right),
-                    "focus pane right",
+                    Cow::Owned(rust_i18n::t!("keybind.focus_pane_right").to_string()),
                 ),
-                entry(binding_label(&keybinds.cycle_pane_next), "cycle pane next"),
+                entry(
+                    binding_label(&keybinds.cycle_pane_next),
+                    Cow::Owned(rust_i18n::t!("keybind.cycle_pane_next").to_string()),
+                ),
                 entry(
                     binding_label(&keybinds.cycle_pane_previous),
-                    "cycle pane previous",
+                    Cow::Owned(rust_i18n::t!("keybind.cycle_pane_previous").to_string()),
                 ),
-                entry(binding_label(&keybinds.last_pane), "last pane"),
+                entry(
+                    binding_label(&keybinds.last_pane),
+                    Cow::Owned(rust_i18n::t!("keybind.last_pane").to_string()),
+                ),
             ],
         ),
     ];
 
     if !keybinds.custom_commands.is_empty() {
         groups.push((
-            "custom",
+            Cow::Owned(rust_i18n::t!("keybind.group_custom").to_string()),
             keybinds
                 .custom_commands
                 .iter()
@@ -207,7 +333,9 @@ pub(crate) fn keybind_help_groups(
                             .description
                             .clone()
                             .map(Cow::Owned)
-                            .unwrap_or(Cow::Borrowed("custom command")),
+                            .unwrap_or(Cow::Owned(
+                                rust_i18n::t!("keybind.custom_command").to_string(),
+                            )),
                     )
                 })
                 .collect(),
@@ -245,12 +373,18 @@ mod tests {
     fn groups() -> Vec<KeybindHelpGroup> {
         vec![
             (
-                "workspaces / tabs",
-                vec![entry("w", "workspace navigation"), entry("c", "new tab")],
+                Cow::Borrowed("workspaces / tabs"),
+                vec![
+                    entry("w", Cow::Borrowed("workspace navigation")),
+                    entry("c", Cow::Borrowed("new tab")),
+                ],
             ),
             (
-                "panes",
-                vec![entry("v", "split vertical"), entry("x", "close pane")],
+                Cow::Borrowed("panes"),
+                vec![
+                    entry("v", Cow::Borrowed("split vertical")),
+                    entry("x", Cow::Borrowed("close pane")),
+                ],
             ),
         ]
     }

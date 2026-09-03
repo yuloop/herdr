@@ -437,6 +437,15 @@ keybind:
   cycle_pane_next: "下一个窗格"
   cycle_pane_previous: "上一个窗格"
   last_pane: "最近窗格"
+  keybinds: "快捷键"
+  settings: "设置"
+  detach: "分离"
+  move_tab_left: "向左移动标签页"
+  move_tab_right: "向右移动标签页"
+  resize_pane_left: "向左调整窗格"
+  resize_pane_down: "向下调整窗格"
+  resize_pane_up: "向上调整窗格"
+  resize_pane_right: "向右调整窗格"
 
 # release 发布说明 (release_notes.rs)
 release:

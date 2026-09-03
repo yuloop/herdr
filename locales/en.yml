@@ -437,6 +437,15 @@ keybind:
   cycle_pane_next: "cycle pane next"
   cycle_pane_previous: "cycle pane previous"
   last_pane: "last pane"
+  keybinds: "keybinds"
+  settings: "settings"
+  detach: "detach"
+  move_tab_left: "move tab left"
+  move_tab_right: "move tab right"
+  resize_pane_left: "resize pane left"
+  resize_pane_down: "resize pane down"
+  resize_pane_up: "resize pane up"
+  resize_pane_right: "resize pane right"
 
 # release 发布说明 (release_notes.rs)
 release:

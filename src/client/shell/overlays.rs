@@ -638,7 +638,7 @@ fn render_rename_overlay(
     button(
         b,
         *save,
-        " ↵ save ",
+        &format!(" ↵ {} ", rust_i18n::t!("common.save")),
         Style::default()
             .fg(contrast(p))
             .bg(p.accent)
@@ -648,8 +648,18 @@ fn render_rename_overlay(
         .fg(p.text)
         .bg(p.surface0)
         .add_modifier(Modifier::BOLD);
-    button(b, *clear, " ^c clear ", n);
-    button(b, *cancel, " esc cancel ", n);
+    button(
+        b,
+        *clear,
+        &format!(" ^c {} ", rust_i18n::t!("common.clear")),
+        n,
+    );
+    button(
+        b,
+        *cancel,
+        &format!(" esc {} ", rust_i18n::t!("common.cancel")),
+        n,
+    );
     Some(OverlayRender {
         primary: *save,
         clear: *clear,
@@ -699,7 +709,9 @@ pub(crate) fn client_navigator_rows(
                     .or_else(|| a.and_then(|a| a.name.clone()))
                     .or_else(|| a.and_then(|a| a.display_agent.clone()))
                     .or_else(|| a.and_then(|a| a.title.clone()))
-                    .unwrap_or_else(|| format!("pane {}", ix + 1));
+                    .unwrap_or_else(|| {
+                        rust_i18n::t!("nav.pane_label", number = ix + 1).to_string()
+                    });
                 let meta = p
                     .foreground_cwd
                     .clone()
@@ -720,10 +732,11 @@ pub(crate) fn client_navigator_rows(
                 children.push(ClientNavigatorRow {
                     depth: 1,
                     label: t.label.clone(),
-                    meta: format!(
-                        "{} panes",
-                        s.panes.iter().filter(|p| p.tab_id == t.tab_id).count()
-                    ),
+                    meta: rust_i18n::t!(
+                        "nav.pane_count",
+                        count = s.panes.iter().filter(|p| p.tab_id == t.tab_id).count()
+                    )
+                    .to_string(),
                     status: t.agent_status,
                     current: s.focused_tab_id.as_deref() == Some(&t.tab_id),
                     target: ClientNavigatorTarget::Tab(t.tab_id.clone()),
@@ -773,14 +786,16 @@ fn render_navigator_overlay(
         format!(
             " / {}",
             match f {
-                ClientNavigatorFilter::Blocked => "blocked",
-                ClientNavigatorFilter::Working => "working",
-                ClientNavigatorFilter::Idle => "idle",
-                ClientNavigatorFilter::Done => "done",
+                ClientNavigatorFilter::Blocked =>
+                    rust_i18n::t!("status.blocked").to_string(),
+                ClientNavigatorFilter::Working =>
+                    rust_i18n::t!("status.working").to_string(),
+                ClientNavigatorFilter::Idle => rust_i18n::t!("status.idle").to_string(),
+                ClientNavigatorFilter::Done => rust_i18n::t!("status.done").to_string(),
             }
         )
     } else if n.query.is_empty() {
-        " / search panes".to_owned()
+        format!(" / {}", rust_i18n::t!("nav.search_panes"))
     } else {
         format!(" / {}", n.query)
     };
@@ -798,7 +813,7 @@ fn render_navigator_overlay(
         b,
         i,
         i.y,
-        &format!("{} panes", s.panes.len()),
+        &rust_i18n::t!("nav.pane_count", count = s.panes.len()).to_string(),
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
     put_text(

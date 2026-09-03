@@ -9,6 +9,7 @@ pub(super) fn command() -> Command {
         .disable_help_flag(true)
         .disable_version_flag(true)
         .arg(help_flag())
+        .arg(flag("no-session").help(t!("cli.no_session_help").to_string()))
         .arg(option("session", "NAME").help(t!("cli.session_help").to_string()))
         .arg(option("remote", "TARGET").help(t!("cli.remote_help").to_string()))
         .arg(

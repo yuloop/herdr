@@ -57,7 +57,7 @@ pub(super) fn render_mode_bar(
     let prefix_rhs = |bindings: &crate::config::ActionKeybinds| {
         bindings
             .prefix_rhs_label()
-            .unwrap_or_else(|| "unset".to_owned())
+            .unwrap_or_else(|| rust_i18n::t!("common.unset").to_string())
     };
 
     let mut segments = Vec::<(String, Style)>::new();
@@ -70,40 +70,52 @@ pub(super) fn render_mode_bar(
         match mode {
             ClientShellMode::Prefix => {
                 segments.extend([
-                    (" PREFIX ".to_owned(), mode_style),
+                    (
+                        rust_i18n::t!("menu.prefix_label").to_string(),
+                        mode_style,
+                    ),
                     (" ".to_owned(), base),
                     ("esc".to_owned(), key),
-                    (" cancel  ".to_owned(), base),
+                    (rust_i18n::t!("menu.cancel_hint").to_string(), base),
                     (prefix, key),
-                    (" send prefix  ".to_owned(), base),
+                    (rust_i18n::t!("menu.send_prefix").to_string(), base),
                     (prefix_rhs(&keybinds.keybinds.workspace_picker), key),
-                    (" workspace nav  ".to_owned(), base),
+                    (
+                        rust_i18n::t!("menu.workspace_nav_hint").to_string(),
+                        base,
+                    ),
                     (prefix_rhs(&keybinds.keybinds.help), key),
-                    (" keybinds".to_owned(), base),
+                    (rust_i18n::t!("menu.keybinds_hint").to_string(), base),
                 ]);
             }
             ClientShellMode::Navigate => {
                 segments.extend([
-                    (" NAVIGATE ".to_owned(), mode_style),
+                    (
+                        rust_i18n::t!("menu.navigate_label").to_string(),
+                        mode_style,
+                    ),
                     (" esc back  ".to_owned(), base),
                     ("↑/↓".to_owned(), key),
                     (" workspace  ".to_owned(), base),
                     ("tab".to_owned(), key),
-                    (" pane  ".to_owned(), base),
+                    (rust_i18n::t!("menu.pane_hint").to_string(), base),
                     (prefix_rhs(&keybinds.keybinds.help), key),
-                    (" keybinds".to_owned(), base),
+                    (rust_i18n::t!("menu.keybinds_hint").to_string(), base),
                 ]);
             }
             ClientShellMode::Resize => {
                 segments.extend([
-                    (" RESIZE ".to_owned(), mode_style),
+                    (
+                        rust_i18n::t!("menu.resize_label").to_string(),
+                        mode_style,
+                    ),
                     ("  ".to_owned(), base),
                     ("h/l".to_owned(), key),
-                    (" width  ".to_owned(), base),
+                    (rust_i18n::t!("menu.width_hint").to_string(), base),
                     ("j/k".to_owned(), key),
-                    (" height  ".to_owned(), base),
+                    (rust_i18n::t!("menu.height_hint").to_string(), base),
                     ("esc".to_owned(), key),
-                    (" done".to_owned(), base),
+                    (rust_i18n::t!("menu.done_hint").to_string(), base),
                 ]);
             }
             ClientShellMode::Copy => {
@@ -114,7 +126,10 @@ pub(super) fn render_mode_bar(
                         crate::api::schema::PaneCopySearchDirection::Backward => "?",
                     };
                     segments.extend([
-                        (" COPY ".to_owned(), mode_style),
+                        (
+                            rust_i18n::t!("menu.copy_label").to_string(),
+                            mode_style,
+                        ),
                         (" ".to_owned(), base),
                         (marker.to_owned(), key),
                         (
@@ -122,13 +137,16 @@ pub(super) fn render_mode_bar(
                             Style::default().fg(palette.text).bg(palette.panel_bg),
                         ),
                         ("█".to_owned(), key),
-                        ("  enter search  esc cancel".to_owned(), base),
+                        (
+                            rust_i18n::t!("menu.enter_search_cancel").to_string(),
+                            base,
+                        ),
                     ]);
                 } else {
                     let select = if copy_mode.selection.is_some() {
-                        "selecting"
+                        rust_i18n::t!("menu.selecting").to_string()
                     } else {
-                        "select"
+                        rust_i18n::t!("menu.select").to_string()
                     };
                     let match_status = copy_mode
                         .search_current_global
@@ -137,25 +155,35 @@ pub(super) fn render_mode_bar(
                         .unwrap_or_default();
                     let (exit_keys, exit_label) =
                         if copy_mode.search_query.is_empty() && copy_mode.selection.is_none() {
-                            ("q/esc", " exit")
+                            ("q/esc", rust_i18n::t!("menu.exit_hint").to_string())
                         } else {
-                            ("esc", " clear  q exit")
+                            ("esc", rust_i18n::t!("menu.clear_exit_hint").to_string())
                         };
                     segments.extend([
-                        (" COPY ".to_owned(), mode_style),
+                        (
+                            rust_i18n::t!("menu.copy_label").to_string(),
+                            mode_style,
+                        ),
                         (" ".to_owned(), base),
                         ("h/j/k/l w/b/e { }".to_owned(), key),
-                        (" move  ".to_owned(), base),
+                        (rust_i18n::t!("menu.move_hint").to_string(), base),
                         ("/ ?".to_owned(), key),
-                        (" search  ".to_owned(), base),
+                        (rust_i18n::t!("menu.search_hint").to_string(), base),
                         ("n/N".to_owned(), key),
-                        (format!(" repeat{match_status}  "), base),
+                        (
+                            format!(
+                                " {}{}  ",
+                                rust_i18n::t!("menu.repeat"),
+                                match_status
+                            ),
+                            base,
+                        ),
                         ("v/space".to_owned(), key),
                         (format!(" {select}  "), base),
                         ("y/enter".to_owned(), key),
-                        (" copy  ".to_owned(), base),
+                        (rust_i18n::t!("menu.copy_hint").to_string(), base),
                         (exit_keys.to_owned(), key),
-                        (exit_label.to_owned(), base),
+                        (exit_label, base),
                     ]);
                 }
             }
@@ -185,7 +213,7 @@ pub(super) fn render_mode_bar(
             buffer,
             area,
             area.y,
-            " update ready",
+            &rust_i18n::t!("menu.update_ready").to_string(),
             Style::default()
                 .fg(palette.accent)
                 .bg(palette.panel_bg)

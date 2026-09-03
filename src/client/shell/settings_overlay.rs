@@ -58,7 +58,7 @@ pub(super) fn render_settings_overlay(
         inner.x,
         inner.y,
         inner.width,
-        " settings",
+        &rust_i18n::t!("settings.title").to_string(),
         Style::default()
             .fg(palette.text)
             .bg(palette.panel_bg)
@@ -75,9 +75,9 @@ pub(super) fn render_settings_overlay(
     for section in ClientSettingsSection::ALL {
         let badge = *section == ClientSettingsSection::Integrations && integration_badge;
         let label = if badge {
-            format!(" ● {} ", section.label())
+            format!(" ● {} ", section.display_label())
         } else {
-            format!(" {} ", section.label())
+            format!(" {} ", section.display_label())
         };
         let width = display_width(&label).min(inner.right().saturating_sub(tab_x));
         let rect = Rect::new(tab_x, inner.y + 1, width, 1);
@@ -159,36 +159,47 @@ pub(super) fn render_settings_overlay(
             }
         }
         ClientSettingsSection::Indicators => {
+            let title = rust_i18n::t!("settings.status_indicators").to_string();
+            let description = rust_i18n::t!("settings.status_indicators_desc").to_string();
+            let color_dots = format!("{}  ● ● ● ○ ·", rust_i18n::t!("settings.color_dots"));
+            let distinct_symbols =
+                format!("{}  × ◐ ✓ ○ ·", rust_i18n::t!("settings.distinct_symbols"));
             render_choice_section(
                 buffer,
                 content,
-                "agent status indicators",
-                "choose color dots or distinct symbols for each state",
-                &["color dots  ● ● ● ○ ·", "distinct symbols  × ◐ ✓ ○ ·"],
+                &title,
+                &description,
+                &[&color_dots, &distinct_symbols],
                 settings.selected,
                 palette,
                 &mut choice_hits,
             );
         }
         ClientSettingsSection::Sound => {
+            let on = rust_i18n::t!("common.on").to_string();
+            let off = rust_i18n::t!("common.off").to_string();
             render_choice_section(
                 buffer,
                 content,
-                "sound alerts",
-                "play sounds when agents change state in background",
-                &["on", "off"],
+                &rust_i18n::t!("state.sound_alerts").to_string(),
+                &rust_i18n::t!("state.sound_alerts_desc").to_string(),
+                &[&on, &off],
                 settings.selected,
                 palette,
                 &mut choice_hits,
             );
         }
         ClientSettingsSection::Toast => {
+            let off = rust_i18n::t!("common.off").to_string();
+            let inside = rust_i18n::t!("state.inside_herdr").to_string();
+            let via_terminal = rust_i18n::t!("state.via_terminal").to_string();
+            let via_system = rust_i18n::t!("state.via_system").to_string();
             render_choice_section(
                 buffer,
                 content,
-                "notification popups",
-                "choose where background popup notifications should appear",
-                &["off", "inside herdr", "via terminal", "via system"],
+                &rust_i18n::t!("state.notification_popups").to_string(),
+                &rust_i18n::t!("state.notification_popups_desc").to_string(),
+                &[&off, &inside, &via_terminal, &via_system],
                 settings.selected,
                 palette,
                 &mut choice_hits,
@@ -206,16 +217,18 @@ pub(super) fn render_settings_overlay(
     let show_primary = settings.section != ClientSettingsSection::Integrations || installable;
     let labels = if show_primary { vec![10, 12] } else { vec![12] };
     let buttons = row(inner, &labels, 2, inner.height.saturating_sub(1));
+    let primary_label = if settings.section == ClientSettingsSection::Integrations {
+        rust_i18n::t!("common.install").to_string()
+    } else {
+        rust_i18n::t!("common.apply").to_string()
+    };
+    let close_label = rust_i18n::t!("common.close").to_string();
     let (primary, close) = if show_primary {
         let primary = buttons[0];
         button(
             buffer,
             primary,
-            if settings.section == ClientSettingsSection::Integrations {
-                " ↵ install "
-            } else {
-                " ↵ apply "
-            },
+            &format!(" ↵ {primary_label} "),
             Style::default()
                 .fg(contrast(palette))
                 .bg(palette.accent)
@@ -228,7 +241,7 @@ pub(super) fn render_settings_overlay(
     button(
         buffer,
         close,
-        " esc close ",
+        &format!(" esc {close_label} "),
         Style::default()
             .fg(palette.text)
             .bg(palette.surface0)
@@ -239,7 +252,11 @@ pub(super) fn render_settings_overlay(
         inner.x,
         inner.bottom().saturating_sub(2),
         inner.width,
-        " ↑↓ select  tab section",
+        &format!(
+            " ↑↓{} tab{}",
+            rust_i18n::t!("settings.select_hint"),
+            rust_i18n::t!("settings.section_hint")
+        ),
         Style::default().fg(palette.overlay1).bg(palette.panel_bg),
     );
 
@@ -305,7 +322,7 @@ fn render_integrations(
         area.x,
         area.y,
         area.width,
-        "agent integrations",
+        &rust_i18n::t!("settings.agent_integrations").to_string(),
         Style::default()
             .fg(palette.text)
             .bg(palette.panel_bg)
@@ -316,7 +333,7 @@ fn render_integrations(
         area.x,
         area.y + 1,
         area.width,
-        "let agents report state directly instead of relying only on process detection",
+        &rust_i18n::t!("settings.integrations_desc").to_string(),
         Style::default().fg(palette.overlay1).bg(palette.panel_bg),
     );
     if settings.loading_integrations {
@@ -336,7 +353,7 @@ fn render_integrations(
             area.x,
             area.y + 3,
             area.width,
-            " no integration targets available",
+            &rust_i18n::t!("settings.no_integration_targets").to_string(),
             Style::default().fg(palette.overlay1).bg(palette.panel_bg),
         );
         return;
@@ -347,16 +364,26 @@ fn render_integrations(
             break;
         }
         let (marker, color, status) = match integration.state {
-            crate::api::schema::IntegrationState::Current => ("✓", palette.green, "installed"),
-            crate::api::schema::IntegrationState::Outdated => {
-                ("↻", palette.yellow, "update available")
-            }
-            crate::api::schema::IntegrationState::NotInstalled if integration.available => {
-                ("+", palette.accent, "available")
-            }
-            crate::api::schema::IntegrationState::NotInstalled => {
-                ("–", palette.overlay0, "not found")
-            }
+            crate::api::schema::IntegrationState::Current => (
+                "✓",
+                palette.green,
+                rust_i18n::t!("settings.integration_installed").to_string(),
+            ),
+            crate::api::schema::IntegrationState::Outdated => (
+                "↻",
+                palette.yellow,
+                rust_i18n::t!("settings.integration_update_available").to_string(),
+            ),
+            crate::api::schema::IntegrationState::NotInstalled if integration.available => (
+                "+",
+                palette.accent,
+                rust_i18n::t!("settings.integration_available").to_string(),
+            ),
+            crate::api::schema::IntegrationState::NotInstalled => (
+                "–",
+                palette.overlay0,
+                rust_i18n::t!("settings.integration_not_found").to_string(),
+            ),
         };
         put_text(
             buffer,
@@ -379,7 +406,7 @@ fn render_integrations(
             area.x + 14,
             y,
             area.width.saturating_sub(14),
-            status,
+            &status,
             Style::default().fg(palette.overlay1).bg(palette.panel_bg),
         );
     }

@@ -432,6 +432,16 @@ impl ClientSettingsSection {
             Self::Integrations => "integrations",
         }
     }
+
+    pub(super) fn display_label(self) -> String {
+        match self {
+            Self::Theme => rust_i18n::t!("state.theme").to_string(),
+            Self::Indicators => rust_i18n::t!("state.indicators").to_string(),
+            Self::Sound => rust_i18n::t!("state.sound").to_string(),
+            Self::Toast => rust_i18n::t!("state.toasts").to_string(),
+            Self::Integrations => rust_i18n::t!("state.integrations").to_string(),
+        }
+    }
 }
 
 #[derive(Debug)]

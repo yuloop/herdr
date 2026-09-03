@@ -496,6 +496,8 @@ fn restore_tab(
             .and_then(|pane| pane.managed_agent_kind.as_deref())
             .and_then(crate::detect::parse_canonical_agent_label);
         let saved_launch_argv = saved_pane.and_then(|p| p.launch_argv.clone());
+        let saved_origin_id = saved_pane.and_then(|p| p.origin_workspace_id.clone());
+        let saved_origin_label = saved_pane.and_then(|p| p.origin_workspace_label.clone());
         let saved_agent_session = saved_pane.and_then(|p| p.agent_session.as_ref());
         let saved_history =
             old_id.and_then(|old_id| history.and_then(|history| history.panes.get(old_id)));
@@ -561,7 +563,12 @@ fn restore_tab(
                     std::time::Instant::now(),
                 );
             }
-            panes.insert(*id, PaneState::new(terminal_id));
+            panes.insert(*id, {
+                let mut pane_state = PaneState::new(terminal_id);
+                pane_state.origin_workspace_id = saved_origin_id.clone();
+                pane_state.origin_workspace_label = saved_origin_label.clone();
+                pane_state
+            });
             terminals.push(terminal);
             continue;
         }
@@ -660,7 +667,12 @@ fn restore_tab(
                         std::time::Instant::now(),
                     );
                 }
-                panes.insert(*id, PaneState::new(terminal_id.clone()));
+                panes.insert(*id, {
+                    let mut pane_state = PaneState::new(terminal_id.clone());
+                    pane_state.origin_workspace_id = saved_origin_id.clone();
+                    pane_state.origin_workspace_label = saved_origin_label.clone();
+                    pane_state
+                });
                 terminal_runtimes.insert(terminal_id, runtime);
                 terminals.push(terminal);
             }

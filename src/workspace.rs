@@ -1315,9 +1315,20 @@ impl Workspace {
 
     pub(crate) fn test_split(&mut self, direction: Direction) -> PaneId {
         let tab = self.active_tab_mut().expect("workspace must have tab");
+        let focused_pane = tab.layout.focused();
+        let inherited_workspace_origin = tab.panes.get(&focused_pane).map(|pane| {
+            (
+                pane.origin_workspace_id.clone(),
+                pane.origin_workspace_label.clone(),
+            )
+        });
         let new_id = tab.layout.split_focused(direction);
-        tab.panes
-            .insert(new_id, PaneState::new(TerminalId::alloc()));
+        let mut pane_state = PaneState::new(TerminalId::alloc());
+        if let Some((origin_workspace_id, origin_workspace_label)) = inherited_workspace_origin {
+            pane_state.origin_workspace_id = origin_workspace_id;
+            pane_state.origin_workspace_label = origin_workspace_label;
+        }
+        tab.panes.insert(new_id, pane_state);
         self.register_new_pane(new_id);
         new_id
     }

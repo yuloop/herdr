@@ -167,7 +167,7 @@ fn clipboard_feedback_is_client_local_and_respects_config() {
 #[test]
 fn retained_mouse_selection_copies_only_on_exact_copy_shortcut() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.config.copy_on_select = false;
+    state.config.copy_on_select = crate::config::CopyOnSelectModeConfig::Manual;
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     state.compose(106, 20).expect("composed frame");
@@ -916,7 +916,7 @@ fn copy_mode_survives_mouse_motion_and_parks_across_focus_changes() {
 #[test]
 fn retained_selection_copy_suppresses_key_repeats() {
     let mut config = Config::default();
-    config.ui.copy_on_select = false;
+    config.ui.copy_on_select = crate::config::CopyOnSelectModeConfig::Manual;
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());

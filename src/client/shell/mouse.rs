@@ -1678,7 +1678,9 @@ impl ClientShellState {
                 .selection
                 .as_mut()
                 .is_some_and(crate::selection::Selection::finish);
-            if copied && self.config.copy_on_select {
+            if copied
+                && self.config.copy_on_select == crate::config::CopyOnSelectModeConfig::Clipboard
+            {
                 self.request_selection_copy(outcome);
                 self.selection = None;
             } else if !copied {

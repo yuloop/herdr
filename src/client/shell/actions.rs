@@ -663,7 +663,7 @@ impl ClientShellState {
                 self.selection = Some(selection);
                 self.selection_autoscroll = None;
                 self.selection_autoscroll_deadline = None;
-                if !self.config.copy_on_select {
+                if self.config.copy_on_select != crate::config::CopyOnSelectModeConfig::Clipboard {
                     return (true, Vec::new());
                 }
                 self.selection_highlight_clear_deadline =

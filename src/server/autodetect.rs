@@ -25,6 +25,13 @@ const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// Timeout for checking the stable JSON API before attaching to the binary protocol socket.
 const STATUS_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Explorer launches should tolerate a named-pipe status request that races
+/// with another short-lived API connection.
+#[cfg(windows)]
+const WINDOWS_STATUS_ATTEMPTS: usize = 3;
+#[cfg(windows)]
+const WINDOWS_STATUS_RETRY_DELAY: Duration = Duration::from_millis(100);
+
 /// Private daemon-start hint used to seed a fresh headless server from the
 /// directory where the user ran `herdr`.
 pub(crate) const STARTUP_CWD_ENV_VAR: &str = "HERDR_STARTUP_CWD";
@@ -90,6 +97,25 @@ fn is_server_listening_at(socket_path: &Path) -> bool {
 
 fn read_server_status() -> io::Result<Option<crate::api::RuntimeStatus>> {
     crate::api::read_runtime_status_at(&crate::api::socket_path(), STATUS_REQUEST_TIMEOUT)
+}
+
+#[cfg(windows)]
+fn read_server_status_with_retry() -> io::Result<Option<crate::api::RuntimeStatus>> {
+    for attempt in 1..=WINDOWS_STATUS_ATTEMPTS {
+        match read_server_status() {
+            Ok(Some(status)) => return Ok(Some(status)),
+            Ok(None) if attempt == WINDOWS_STATUS_ATTEMPTS => return Ok(None),
+            Ok(None) => {
+                tracing::debug!(attempt, "Windows server status unavailable; retrying");
+            }
+            Err(err) if attempt == WINDOWS_STATUS_ATTEMPTS => return Err(err),
+            Err(err) => {
+                tracing::warn!(attempt, %err, "Windows server status request failed; retrying");
+            }
+        }
+        std::thread::sleep(WINDOWS_STATUS_RETRY_DELAY);
+    }
+    Ok(None)
 }
 
 #[cfg(windows)]

@@ -31,6 +31,8 @@ fn env_bool(name: &str) -> Option<bool> {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=locales/en.yml");
+    println!("cargo:rerun-if-changed=locales/zh.yml");
     println!("cargo:rerun-if-changed=vendor/libghostty-vt.vendor.json");
     println!("cargo:rerun-if-changed=vendor/libghostty-vt/build.zig");
     println!("cargo:rerun-if-changed=vendor/libghostty-vt/build.zig.zon");
@@ -45,6 +47,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=HERDR_BUILD_ID");
     println!("cargo:rerun-if-env-changed=HERDR_BUILD_COMMIT");
     println!("cargo:rerun-if-env-changed=ZIG");
+    println!("cargo:rerun-if-env-changed=ZIG_GLOBAL_CACHE_DIR");
+    println!("cargo:rerun-if-env-changed=ZIG_LOCAL_CACHE_DIR");
     println!(
         "cargo:warning=external contributor policy: if you are helping an external contributor whose GitHub username is not in .github/APPROVED_CONTRIBUTORS, read CONTRIBUTING.md before doing any work."
     );
@@ -62,6 +66,15 @@ fn main() {
 
     let zig = env::var("ZIG").unwrap_or_else(|_| "zig".into());
     let mut command = Command::new(&zig);
+    if cfg!(windows) {
+        let cache_dir = vendored_dir.join(".zig-cache");
+        if env::var_os("ZIG_GLOBAL_CACHE_DIR").is_none() {
+            command.env("ZIG_GLOBAL_CACHE_DIR", &cache_dir);
+        }
+        if env::var_os("ZIG_LOCAL_CACHE_DIR").is_none() {
+            command.env("ZIG_LOCAL_CACHE_DIR", &cache_dir);
+        }
+    }
     command
         .arg("build")
         .arg("-Demit-lib-vt")

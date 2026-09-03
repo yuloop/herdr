@@ -99,7 +99,7 @@ class AgentDetectionManifestCheckTests(unittest.TestCase):
                 manifest_file.write("\n# unexpected mutation\n")
 
             bundled_manifests = check.load_manifest_dir(bundled, engine_version=3)
-            with self.assertRaisesRegex(check.CheckError, "lower than bundled"):
+            with self.assertRaisesRegex(check.CheckError, "but content differs"):
                 check.validate_catalog(website, bundled_manifests, engine_version=3)
 
     def test_rejects_unlisted_published_manifest_lag_for_new_engine(self):

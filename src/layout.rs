@@ -61,7 +61,7 @@ pub struct SplitBorder {
 }
 
 /// Cardinal direction for pane navigation.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavDirection {
     Left,
     Right,
@@ -69,8 +69,37 @@ pub enum NavDirection {
     Down,
 }
 
+/// Edge of a target pane where an existing pane should be attached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanePlacement {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+/// Built-in arrangements for reusing the panes already present in a tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutPreset {
+    Columns,
+    Rows,
+    Grid,
+    MainLeft,
+    MainTop,
+}
+
+impl LayoutPreset {
+    pub const ALL: [Self; 5] = [
+        Self::Columns,
+        Self::Rows,
+        Self::Grid,
+        Self::MainLeft,
+        Self::MainTop,
+    ];
+}
+
 /// A node in the BSP tree. Public for serialization.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     Pane(PaneId),
     Split {
@@ -82,7 +111,7 @@ pub enum Node {
 }
 
 /// BSP tiling layout. Tracks a tree of splits and a focused pane.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TileLayout {
     root: Node,
     focus: PaneId,
@@ -199,6 +228,87 @@ impl TileLayout {
         if focus {
             self.set_focus(moved);
         }
+        true
+    }
+
+    /// Move an existing pane beside another pane without changing pane ids or
+    /// terminal ownership. The mutation is atomic: an invalid candidate leaves
+    /// the current tree untouched.
+    pub fn reposition_pane(
+        &mut self,
+        source: PaneId,
+        target: PaneId,
+        placement: PanePlacement,
+        source_ratio: f32,
+    ) -> bool {
+        if source == target || self.pane_count() <= 1 {
+            return false;
+        }
+        let original_ids = self.pane_ids();
+        if !original_ids.contains(&source) || !original_ids.contains(&target) {
+            return false;
+        }
+
+        let Some(without_source) = remove_pane(self.root.clone(), source) else {
+            return false;
+        };
+        let source_ratio = valid_split_ratio(source_ratio);
+        let (direction, source_first) = match placement {
+            PanePlacement::Left => (Direction::Horizontal, true),
+            PanePlacement::Right => (Direction::Horizontal, false),
+            PanePlacement::Up => (Direction::Vertical, true),
+            PanePlacement::Down => (Direction::Vertical, false),
+        };
+        let candidate = split_existing_at(
+            without_source,
+            target,
+            direction,
+            source,
+            source_first,
+            source_ratio,
+        );
+        if candidate == self.root || !node_has_exact_panes(&candidate, &original_ids) {
+            return false;
+        }
+
+        self.root = candidate;
+        true
+    }
+
+    /// Rebuild the layout tree from a built-in preset while preserving the
+    /// exact pane set and the currently focused pane.
+    pub fn apply_preset(
+        &mut self,
+        ordered_panes: &[PaneId],
+        anchor: PaneId,
+        preset: LayoutPreset,
+    ) -> bool {
+        let original_ids = self.pane_ids();
+        if original_ids.len() <= 1
+            || !original_ids.contains(&anchor)
+            || !same_pane_set(ordered_panes, &original_ids)
+        {
+            return false;
+        }
+
+        let mut panes = Vec::with_capacity(ordered_panes.len());
+        panes.push(anchor);
+        panes.extend(ordered_panes.iter().copied().filter(|pane| *pane != anchor));
+        let candidate = match preset {
+            LayoutPreset::Columns => build_equal_panes(&panes, Direction::Horizontal),
+            LayoutPreset::Rows => build_equal_panes(&panes, Direction::Vertical),
+            LayoutPreset::Grid => build_grid(&panes),
+            LayoutPreset::MainLeft => build_main_pane(&panes, Direction::Horizontal),
+            LayoutPreset::MainTop => build_main_pane(&panes, Direction::Vertical),
+        };
+        let Some(candidate) = candidate else {
+            return false;
+        };
+        if candidate == self.root || !node_has_exact_panes(&candidate, &original_ids) {
+            return false;
+        }
+
+        self.root = candidate;
         true
     }
 
@@ -335,7 +445,6 @@ impl TileLayout {
         &self.root
     }
 
-    /// Reconstruct a layout from a saved tree.
     /// Reconstruct a layout from a saved tree.
     pub fn from_saved(root: Node, focus: PaneId) -> Self {
         Self {
@@ -618,6 +727,133 @@ fn split_at(
     }
 }
 
+fn split_existing_at(
+    node: Node,
+    target: PaneId,
+    direction: Direction,
+    source: PaneId,
+    source_first: bool,
+    source_ratio: f32,
+) -> Node {
+    match node {
+        Node::Pane(id) if id == target => {
+            let target = Node::Pane(id);
+            let source = Node::Pane(source);
+            if source_first {
+                Node::Split {
+                    direction,
+                    ratio: source_ratio,
+                    first: Box::new(source),
+                    second: Box::new(target),
+                }
+            } else {
+                Node::Split {
+                    direction,
+                    ratio: valid_split_ratio(1.0 - source_ratio),
+                    first: Box::new(target),
+                    second: Box::new(source),
+                }
+            }
+        }
+        Node::Pane(_) => node,
+        Node::Split {
+            direction: existing_direction,
+            ratio,
+            first,
+            second,
+        } => Node::Split {
+            direction: existing_direction,
+            ratio,
+            first: Box::new(split_existing_at(
+                *first,
+                target,
+                direction,
+                source,
+                source_first,
+                source_ratio,
+            )),
+            second: Box::new(split_existing_at(
+                *second,
+                target,
+                direction,
+                source,
+                source_first,
+                source_ratio,
+            )),
+        },
+    }
+}
+
+fn same_pane_set(candidate: &[PaneId], expected: &[PaneId]) -> bool {
+    if candidate.len() != expected.len() {
+        return false;
+    }
+    let unique = candidate
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    unique.len() == candidate.len() && expected.iter().all(|pane| unique.contains(pane))
+}
+
+fn node_has_exact_panes(node: &Node, expected: &[PaneId]) -> bool {
+    let mut candidate = Vec::new();
+    collect_ids(node, &mut candidate);
+    same_pane_set(&candidate, expected)
+}
+
+fn build_equal_panes(panes: &[PaneId], direction: Direction) -> Option<Node> {
+    build_equal_nodes(panes.iter().copied().map(Node::Pane).collect(), direction)
+}
+
+fn build_equal_nodes(nodes: Vec<Node>, direction: Direction) -> Option<Node> {
+    let node_count = nodes.len();
+    let mut nodes = nodes.into_iter();
+    let first = nodes.next()?;
+    let rest = nodes.collect::<Vec<_>>();
+    if rest.is_empty() {
+        return Some(first);
+    }
+    let second = build_equal_nodes(rest, direction)?;
+    Some(Node::Split {
+        direction,
+        ratio: 1.0 / node_count as f32,
+        first: Box::new(first),
+        second: Box::new(second),
+    })
+}
+
+fn build_grid(panes: &[PaneId]) -> Option<Node> {
+    if panes.is_empty() {
+        return None;
+    }
+    let mut columns = 1usize;
+    while columns.saturating_mul(columns) < panes.len() {
+        columns = columns.saturating_add(1);
+    }
+    let rows = panes
+        .chunks(columns)
+        .filter_map(|row| build_equal_panes(row, Direction::Horizontal))
+        .collect::<Vec<_>>();
+    build_equal_nodes(rows, Direction::Vertical)
+}
+
+fn build_main_pane(panes: &[PaneId], direction: Direction) -> Option<Node> {
+    let (anchor, remaining) = panes.split_first()?;
+    if remaining.is_empty() {
+        return Some(Node::Pane(*anchor));
+    }
+    let secondary_direction = match direction {
+        Direction::Horizontal => Direction::Vertical,
+        Direction::Vertical => Direction::Horizontal,
+    };
+    Some(Node::Split {
+        direction,
+        ratio: 0.6,
+        first: Box::new(Node::Pane(*anchor)),
+        second: Box::new(build_equal_panes(remaining, secondary_direction)?),
+    })
+}
+
 fn valid_split_ratio(ratio: f32) -> f32 {
     if ratio.is_finite() {
         ratio.clamp(0.1, 0.9)
@@ -827,6 +1063,161 @@ mod tests {
         assert_eq!(splits, vec![(Direction::Horizontal, 0.25)]);
         assert_eq!(pane_rect(&layout, root), Rect::new(0, 0, 25, 40));
         assert_eq!(pane_rect(&layout, moved), Rect::new(25, 0, 75, 40));
+    }
+
+    #[test]
+    fn reposition_existing_pane_supports_all_target_edges() {
+        let cases = [
+            (
+                PanePlacement::Left,
+                Rect::new(0, 0, 50, 40),
+                Rect::new(50, 0, 50, 40),
+            ),
+            (
+                PanePlacement::Right,
+                Rect::new(50, 0, 50, 40),
+                Rect::new(0, 0, 50, 40),
+            ),
+            (
+                PanePlacement::Up,
+                Rect::new(0, 0, 100, 20),
+                Rect::new(0, 20, 100, 20),
+            ),
+            (
+                PanePlacement::Down,
+                Rect::new(0, 20, 100, 20),
+                Rect::new(0, 0, 100, 20),
+            ),
+        ];
+
+        for (placement, expected_source, expected_target) in cases {
+            let mut layout = TileLayout::from_saved(
+                Node::Split {
+                    direction: Direction::Horizontal,
+                    ratio: 0.25,
+                    first: Box::new(Node::Pane(pane(1))),
+                    second: Box::new(Node::Pane(pane(2))),
+                },
+                pane(1),
+            );
+
+            assert!(layout.reposition_pane(pane(2), pane(1), placement, 0.5));
+            assert_eq!(layout.pane_ids().len(), 2);
+            assert!(layout.pane_ids().contains(&pane(1)));
+            assert!(layout.pane_ids().contains(&pane(2)));
+            assert_eq!(layout.focused(), pane(1));
+            assert_eq!(pane_rect(&layout, pane(2)), expected_source);
+            assert_eq!(pane_rect(&layout, pane(1)), expected_target);
+        }
+    }
+
+    #[test]
+    fn reposition_existing_pane_collapses_old_parent_without_touching_other_ratios() {
+        let mut layout = sample_layout();
+
+        assert!(layout.reposition_pane(pane(4), pane(1), PanePlacement::Left, 0.5));
+
+        assert_eq!(layout.pane_count(), 4);
+        assert_eq!(layout.focused(), pane(2));
+        assert_eq!(
+            layout
+                .pane_ids()
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>(),
+            [pane(1), pane(2), pane(3), pane(4)]
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>()
+        );
+        let splits = split_snapshot(&layout);
+        assert_eq!(splits[0], (Direction::Horizontal, 0.3));
+        assert_eq!(splits[1], (Direction::Horizontal, 0.5));
+        assert_eq!(splits[2], (Direction::Vertical, 0.6));
+    }
+
+    #[test]
+    fn reposition_existing_pane_is_atomic_for_invalid_inputs() {
+        let mut layout = sample_layout();
+        let before = layout.clone();
+
+        assert!(!layout.reposition_pane(pane(2), pane(2), PanePlacement::Right, 0.5));
+        assert!(!layout.reposition_pane(pane(99), pane(1), PanePlacement::Right, 0.5));
+        assert!(!layout.reposition_pane(pane(1), pane(99), PanePlacement::Right, 0.5));
+        assert_eq!(layout, before);
+    }
+
+    #[test]
+    fn layout_presets_reuse_exact_panes_and_keep_focus() {
+        for preset in [
+            LayoutPreset::Columns,
+            LayoutPreset::Rows,
+            LayoutPreset::Grid,
+            LayoutPreset::MainLeft,
+            LayoutPreset::MainTop,
+        ] {
+            let mut layout = sample_layout();
+            let expected_ids = layout
+                .pane_ids()
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>();
+
+            assert!(layout.apply_preset(&[pane(1), pane(2), pane(3), pane(4)], pane(3), preset));
+            assert_eq!(layout.focused(), pane(2));
+            assert_eq!(
+                layout
+                    .pane_ids()
+                    .into_iter()
+                    .collect::<std::collections::HashSet<_>>(),
+                expected_ids
+            );
+        }
+    }
+
+    #[test]
+    fn layout_presets_use_anchor_and_balanced_geometry() {
+        let mut columns = sample_layout();
+        assert!(columns.apply_preset(
+            &[pane(1), pane(2), pane(3), pane(4)],
+            pane(3),
+            LayoutPreset::Columns
+        ));
+        assert_eq!(pane_rect(&columns, pane(3)), Rect::new(0, 0, 25, 40));
+        assert_eq!(pane_rect(&columns, pane(1)), Rect::new(25, 0, 25, 40));
+        assert_eq!(pane_rect(&columns, pane(2)), Rect::new(50, 0, 25, 40));
+        assert_eq!(pane_rect(&columns, pane(4)), Rect::new(75, 0, 25, 40));
+
+        let mut grid = sample_layout();
+        assert!(grid.apply_preset(
+            &[pane(1), pane(2), pane(3), pane(4)],
+            pane(3),
+            LayoutPreset::Grid
+        ));
+        assert_eq!(pane_rect(&grid, pane(3)), Rect::new(0, 0, 50, 20));
+        assert_eq!(pane_rect(&grid, pane(1)), Rect::new(50, 0, 50, 20));
+        assert_eq!(pane_rect(&grid, pane(2)), Rect::new(0, 20, 50, 20));
+        assert_eq!(pane_rect(&grid, pane(4)), Rect::new(50, 20, 50, 20));
+
+        let mut main_left = sample_layout();
+        assert!(main_left.apply_preset(
+            &[pane(1), pane(2), pane(3), pane(4)],
+            pane(3),
+            LayoutPreset::MainLeft
+        ));
+        assert_eq!(pane_rect(&main_left, pane(3)), Rect::new(0, 0, 60, 40));
+        assert_eq!(pane_rect(&main_left, pane(1)), Rect::new(60, 0, 40, 13));
+    }
+
+    #[test]
+    fn layout_preset_rejects_missing_or_duplicate_pane_atomically() {
+        let mut layout = sample_layout();
+        let before = layout.clone();
+
+        assert!(!layout.apply_preset(&[pane(1), pane(2), pane(3)], pane(1), LayoutPreset::Grid));
+        assert!(!layout.apply_preset(
+            &[pane(1), pane(2), pane(2), pane(4)],
+            pane(1),
+            LayoutPreset::Grid
+        ));
+        assert_eq!(layout, before);
     }
 
     #[test]

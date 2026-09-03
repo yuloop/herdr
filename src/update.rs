@@ -1590,8 +1590,8 @@ fn send_server_update_method_at(
     if read == 0 || line.trim().is_empty() {
         return Err(format!("empty {error_prefix} response"));
     }
-    let response: serde_json::Value =
-        serde_json::from_str(&line).map_err(|e| t!("update.invalid_server_response", e = e).to_string())?;
+    let response: serde_json::Value = serde_json::from_str(&line)
+        .map_err(|e| t!("update.invalid_server_response", e = e).to_string())?;
     if let Some(error) = response.get("error") {
         return Err(format!("{error_prefix} failed: {error}"));
     }
@@ -2169,7 +2169,10 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
         return Err("run `herdr update` outside herdr after detaching from the session".into());
     }
 
-    eprintln!("{}", t!("update.checking_channel", channel = channel.as_str()));
+    eprintln!(
+        "{}",
+        t!("update.checking_channel", channel = channel.as_str())
+    );
 
     let current = Version::current();
 
@@ -2200,10 +2203,7 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
         if let Some(sha256) = &release.sha256 {
             tracing::debug!(sha256 = %sha256, "selected Windows update asset has checksum");
         }
-        eprintln!(
-            "{}",
-            t!("update.downloading", label = release.label())
-        );
+        eprintln!("{}", t!("update.downloading", label = release.label()));
         let downloaded_update = download_windows_update(&release)?;
         eprintln!("{}", t!("update.downloaded", label = release.label()));
         install_windows_update_with_installer(&release, &downloaded_update)?;

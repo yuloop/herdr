@@ -428,6 +428,7 @@ pub(crate) fn api_method_name(method: &Method) -> &'static str {
         Method::LayoutExport(_) => "layout.export",
         Method::LayoutApply(_) => "layout.apply",
         Method::LayoutSetSplitRatio(_) => "layout.set_split_ratio",
+        Method::LayoutRearrange(_) => "layout.rearrange",
         Method::PaneNeighbor(_) => "pane.neighbor",
         Method::PaneEdges(_) => "pane.edges",
         Method::PaneFocusDirection(_) => "pane.focus_direction",

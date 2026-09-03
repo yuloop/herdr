@@ -1,13 +1,14 @@
 use bytes::Bytes;
 
 use crate::api::schema::{
-    EventData, EventEnvelope, EventKind, PaneClearAgentAuthorityParams, PaneCopyMotion,
+    EventData, EventEnvelope, EventKind, LayoutRearrangeOperation, LayoutRearrangeParams,
+    LayoutRearrangeReason, LayoutRearrangeResult, PaneClearAgentAuthorityParams, PaneCopyMotion,
     PaneCopyMotionParams, PaneCopySearchDirection, PaneCopySearchParams, PaneCurrentParams,
     PaneDirection, PaneEdgesParams, PaneEdgesResult, PaneFocusDirectionParams,
     PaneFocusDirectionReason, PaneFocusDirectionResult, PaneInfo, PaneInputSetParams,
-    PaneLayoutPane, PaneLayoutParams, PaneLayoutRect, PaneLayoutSnapshot, PaneLayoutSplit,
-    PaneListParams, PaneMoveDestination, PaneMoveParams, PaneMoveReason, PaneMoveResult,
-    PaneNeighborParams, PaneNeighborResult, PaneProcessInfo, PaneProcessInfoParams,
+    PaneLayoutPane, PaneLayoutParams, PaneLayoutPreset, PaneLayoutRect, PaneLayoutSnapshot,
+    PaneLayoutSplit, PaneListParams, PaneMoveDestination, PaneMoveParams, PaneMoveReason,
+    PaneMoveResult, PaneNeighborParams, PaneNeighborResult, PaneProcessInfo, PaneProcessInfoParams,
     PaneProcessInfoProcess, PaneReadParams, PaneReadResult, PaneReleaseAgentParams,
     PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
     PaneReportMetadataParams, PaneResizeParams, PaneResizeReason, PaneResizeResult,
@@ -20,7 +21,7 @@ use crate::app::actions::{PaneZoomCommand, PaneZoomNoopReason};
 use crate::app::App;
 #[cfg(test)]
 use crate::app::Mode;
-use crate::layout::{find_in_direction, NavDirection, PaneId};
+use crate::layout::{find_in_direction, LayoutPreset, NavDirection, PaneId, PanePlacement};
 
 use super::super::api_helpers::{
     detect_state_from_api, encode_api_keys, normalize_metadata_source, normalize_metadata_tokens,
@@ -498,6 +499,166 @@ impl App {
         };
 
         encode_success(id, ResponseResult::PaneLayout { layout })
+    }
+
+    pub(super) fn handle_layout_rearrange(
+        &mut self,
+        id: String,
+        params: LayoutRearrangeParams,
+    ) -> String {
+        let focus = params.focus;
+        let (ws_idx, tab_idx, anchor, anchor_pane_id, target_pane_id, operation, initial_reason) =
+            match params.operation {
+                LayoutRearrangeOperation::Reposition {
+                    source_pane_id,
+                    target_pane_id,
+                    placement,
+                    ratio,
+                } => {
+                    let Some((source_ws_idx, source)) = self.parse_pane_id(&source_pane_id) else {
+                        return encode_error(id, "pane_not_found", "source pane not found");
+                    };
+                    let Some(source_tab_idx) =
+                        self.state.workspaces[source_ws_idx].find_tab_index_for_pane(source)
+                    else {
+                        return encode_error(id, "pane_not_found", "source pane not found");
+                    };
+                    let Some((target_ws_idx, target)) = self.parse_pane_id(&target_pane_id) else {
+                        return encode_error(id, "pane_not_found", "target pane not found");
+                    };
+                    let Some(target_tab_idx) =
+                        self.state.workspaces[target_ws_idx].find_tab_index_for_pane(target)
+                    else {
+                        return encode_error(id, "pane_not_found", "target pane not found");
+                    };
+                    let reason = if source == target {
+                        Some(LayoutRearrangeReason::SamePane)
+                    } else if source_ws_idx != target_ws_idx || source_tab_idx != target_tab_idx {
+                        Some(LayoutRearrangeReason::CrossTab)
+                    } else {
+                        None
+                    };
+                    let source_public_id = self
+                        .public_pane_id(source_ws_idx, source)
+                        .unwrap_or(source_pane_id);
+                    let target_public_id = self
+                        .public_pane_id(target_ws_idx, target)
+                        .unwrap_or(target_pane_id);
+                    (
+                        source_ws_idx,
+                        source_tab_idx,
+                        source,
+                        source_public_id,
+                        Some(target_public_id),
+                        ResolvedLayoutRearrange::Reposition {
+                            target,
+                            placement: placement.into(),
+                            ratio: ratio.unwrap_or(0.5),
+                        },
+                        reason,
+                    )
+                }
+                LayoutRearrangeOperation::Preset {
+                    anchor_pane_id,
+                    preset,
+                } => {
+                    let Some((ws_idx, anchor)) = self.parse_pane_id(&anchor_pane_id) else {
+                        return encode_error(id, "pane_not_found", "anchor pane not found");
+                    };
+                    let Some(tab_idx) =
+                        self.state.workspaces[ws_idx].find_tab_index_for_pane(anchor)
+                    else {
+                        return encode_error(id, "pane_not_found", "anchor pane not found");
+                    };
+                    (
+                        ws_idx,
+                        tab_idx,
+                        anchor,
+                        self.public_pane_id(ws_idx, anchor)
+                            .unwrap_or(anchor_pane_id),
+                        None,
+                        ResolvedLayoutRearrange::Preset {
+                            preset: preset.into(),
+                        },
+                        None,
+                    )
+                }
+            };
+
+        let Some(tab) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|workspace| workspace.tabs.get(tab_idx))
+        else {
+            return encode_error(id, "pane_layout_unavailable", "pane layout unavailable");
+        };
+        let reason = initial_reason
+            .or_else(|| tab.zoomed.then_some(LayoutRearrangeReason::ZoomedTab))
+            .or_else(|| {
+                (tab.layout.pane_count() <= 1).then_some(LayoutRearrangeReason::SinglePane)
+            });
+
+        let visual_order = matches!(operation, ResolvedLayoutRearrange::Preset { .. })
+            .then(|| {
+                let mut panes = tab.layout.panes(self.state.view.terminal_area);
+                panes.sort_by_key(|pane| (pane.rect.y, pane.rect.x));
+                panes.into_iter().map(|pane| pane.id).collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let mut changed = false;
+        if reason.is_none() {
+            if let Some(tab) = self
+                .state
+                .workspaces
+                .get_mut(ws_idx)
+                .and_then(|workspace| workspace.tabs.get_mut(tab_idx))
+            {
+                changed = match operation {
+                    ResolvedLayoutRearrange::Reposition {
+                        target,
+                        placement,
+                        ratio,
+                    } => tab.layout.reposition_pane(anchor, target, placement, ratio),
+                    ResolvedLayoutRearrange::Preset { preset } => {
+                        tab.layout.apply_preset(&visual_order, anchor, preset)
+                    }
+                };
+            }
+        }
+
+        if changed {
+            self.state.mark_session_dirty();
+            if focus {
+                self.state.focus_pane_in_workspace(ws_idx, anchor);
+                self.state.mode = crate::app::Mode::Terminal;
+            }
+            self.schedule_session_save();
+        }
+
+        let Some(layout) = self.pane_layout_snapshot(ws_idx, tab_idx) else {
+            return encode_error(id, "pane_layout_unavailable", "pane layout unavailable");
+        };
+        if changed {
+            self.emit_layout_updated_snapshot(layout.clone());
+        }
+        let reason = reason.or_else(|| (!changed).then_some(LayoutRearrangeReason::Unchanged));
+        let focused_pane_id = layout.focused_pane_id.clone();
+
+        encode_success(
+            id,
+            ResponseResult::LayoutRearrange {
+                rearrange: LayoutRearrangeResult {
+                    changed,
+                    reason,
+                    anchor_pane_id,
+                    target_pane_id,
+                    focused_pane_id,
+                    layout,
+                },
+            },
+        )
     }
 
     pub(super) fn handle_pane_process_info(
@@ -2101,6 +2262,41 @@ impl From<PaneDirection> for NavDirection {
             PaneDirection::Right => NavDirection::Right,
             PaneDirection::Up => NavDirection::Up,
             PaneDirection::Down => NavDirection::Down,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ResolvedLayoutRearrange {
+    Reposition {
+        target: PaneId,
+        placement: PanePlacement,
+        ratio: f32,
+    },
+    Preset {
+        preset: LayoutPreset,
+    },
+}
+
+impl From<PaneDirection> for PanePlacement {
+    fn from(direction: PaneDirection) -> Self {
+        match direction {
+            PaneDirection::Left => PanePlacement::Left,
+            PaneDirection::Right => PanePlacement::Right,
+            PaneDirection::Up => PanePlacement::Up,
+            PaneDirection::Down => PanePlacement::Down,
+        }
+    }
+}
+
+impl From<PaneLayoutPreset> for LayoutPreset {
+    fn from(preset: PaneLayoutPreset) -> Self {
+        match preset {
+            PaneLayoutPreset::Columns => LayoutPreset::Columns,
+            PaneLayoutPreset::Rows => LayoutPreset::Rows,
+            PaneLayoutPreset::Grid => LayoutPreset::Grid,
+            PaneLayoutPreset::MainLeft => LayoutPreset::MainLeft,
+            PaneLayoutPreset::MainTop => LayoutPreset::MainTop,
         }
     }
 }
@@ -3936,6 +4132,228 @@ mod tests {
             layout.splits[0].direction,
             crate::api::schema::SplitDirection::Right
         );
+    }
+
+    #[test]
+    fn api_layout_rearrange_repositions_existing_pane_and_preserves_terminal_ownership() {
+        let mut app = app_with_linked_worktree();
+        let root = app.state.workspaces[0].tabs[0].root_pane;
+        let right = app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        let source = app.state.workspaces[0].test_split(ratatui::layout::Direction::Vertical);
+        app.state.ensure_test_terminals();
+        app.state.workspaces[0].tabs[0].layout.focus_pane(right);
+        crate::ui::compute_view_with_runtime_registry(
+            &mut app.state,
+            &crate::terminal::TerminalRuntimeRegistry::new(),
+            ratatui::layout::Rect::new(0, 0, 100, 40),
+        );
+
+        let source_public = app.public_pane_id(0, source).unwrap();
+        let root_public = app.public_pane_id(0, root).unwrap();
+        let pane_terminals_before = app.state.workspaces[0].tabs[0]
+            .panes
+            .iter()
+            .map(|(pane_id, pane)| (*pane_id, pane.attached_terminal_id.clone()))
+            .collect::<std::collections::HashMap<_, _>>();
+        let terminal_states_before = app
+            .state
+            .terminals
+            .keys()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
+
+        let response = app.handle_layout_rearrange(
+            "req".into(),
+            LayoutRearrangeParams {
+                operation: LayoutRearrangeOperation::Reposition {
+                    source_pane_id: source_public.clone(),
+                    target_pane_id: root_public.clone(),
+                    placement: PaneDirection::Left,
+                    ratio: None,
+                },
+                focus: true,
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::LayoutRearrange { rearrange } = success.result else {
+            panic!("expected layout rearrange response");
+        };
+        assert!(rearrange.changed);
+        assert_eq!(rearrange.reason, None);
+        assert_eq!(rearrange.anchor_pane_id, source_public);
+        assert_eq!(rearrange.target_pane_id, Some(root_public));
+        assert_eq!(rearrange.focused_pane_id, rearrange.anchor_pane_id);
+        assert_eq!(
+            app.state.workspaces[0].tabs[0]
+                .panes
+                .iter()
+                .map(|(pane_id, pane)| (*pane_id, pane.attached_terminal_id.clone()))
+                .collect::<std::collections::HashMap<_, _>>(),
+            pane_terminals_before
+        );
+        assert_eq!(
+            app.state
+                .terminals
+                .keys()
+                .cloned()
+                .collect::<std::collections::HashSet<_>>(),
+            terminal_states_before
+        );
+        assert_eq!(rearrange.layout.panes.len(), 3);
+        assert_eq!(
+            rearrange
+                .layout
+                .panes
+                .iter()
+                .map(|pane| pane.pane_id.clone())
+                .collect::<std::collections::HashSet<_>>(),
+            pane_terminals_before
+                .keys()
+                .filter_map(|pane_id| app.public_pane_id(0, *pane_id))
+                .collect::<std::collections::HashSet<_>>()
+        );
+
+        let panes = app.state.workspaces[0].tabs[0]
+            .layout
+            .panes(app.state.view.terminal_area);
+        let source_rect = panes.iter().find(|pane| pane.id == source).unwrap().rect;
+        let root_rect = panes.iter().find(|pane| pane.id == root).unwrap().rect;
+        assert!(source_rect.x < root_rect.x);
+        assert!(matches!(
+            &app.event_hub.events_after(0).last().expect("layout event").1.data,
+            EventData::LayoutUpdated { layout }
+                if layout.focused_pane_id == rearrange.anchor_pane_id
+        ));
+    }
+
+    #[test]
+    fn api_layout_rearrange_preset_makes_anchor_main_and_can_preserve_focus() {
+        let mut app = app_with_linked_worktree();
+        let root = app.state.workspaces[0].tabs[0].root_pane;
+        let second = app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        let anchor = app.state.workspaces[0].test_split(ratatui::layout::Direction::Vertical);
+        let fourth = app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        app.state.workspaces[0].tabs[0].layout.focus_pane(root);
+        crate::ui::compute_view_with_runtime_registry(
+            &mut app.state,
+            &crate::terminal::TerminalRuntimeRegistry::new(),
+            ratatui::layout::Rect::new(0, 0, 120, 40),
+        );
+        let anchor_public = app.public_pane_id(0, anchor).unwrap();
+        let root_public = app.public_pane_id(0, root).unwrap();
+        let pane_ids_before = [root, second, anchor, fourth]
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+
+        let response = app.handle_layout_rearrange(
+            "req".into(),
+            LayoutRearrangeParams {
+                operation: LayoutRearrangeOperation::Preset {
+                    anchor_pane_id: anchor_public.clone(),
+                    preset: PaneLayoutPreset::MainLeft,
+                },
+                focus: false,
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::LayoutRearrange { rearrange } = success.result else {
+            panic!("expected layout rearrange response");
+        };
+        assert!(rearrange.changed);
+        assert_eq!(rearrange.reason, None);
+        assert_eq!(rearrange.anchor_pane_id, anchor_public);
+        assert_eq!(rearrange.target_pane_id, None);
+        assert_eq!(rearrange.focused_pane_id, root_public);
+        assert_eq!(
+            app.state.workspaces[0].tabs[0]
+                .layout
+                .pane_ids()
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>(),
+            pane_ids_before
+        );
+
+        let panes = app.state.workspaces[0].tabs[0]
+            .layout
+            .panes(app.state.view.terminal_area);
+        let anchor_rect = panes.iter().find(|pane| pane.id == anchor).unwrap().rect;
+        assert_eq!(anchor_rect.x, app.state.view.terminal_area.x);
+        assert_eq!(anchor_rect.y, app.state.view.terminal_area.y);
+        assert_eq!(anchor_rect.height, app.state.view.terminal_area.height);
+        assert!(panes
+            .iter()
+            .filter(|pane| pane.id != anchor)
+            .all(|pane| { pane.rect.x >= anchor_rect.x.saturating_add(anchor_rect.width) }));
+    }
+
+    #[test]
+    fn api_layout_rearrange_rejects_cross_tab_and_zoomed_layouts_atomically() {
+        let mut app = app_with_linked_worktree();
+        let source = app.state.workspaces[0].tabs[0].root_pane;
+        let same_tab_target =
+            app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        let second_tab = app.state.workspaces[0].test_add_tab(Some("other"));
+        let cross_tab_target = app.state.workspaces[0].tabs[second_tab].root_pane;
+        crate::ui::compute_view_with_runtime_registry(
+            &mut app.state,
+            &crate::terminal::TerminalRuntimeRegistry::new(),
+            ratatui::layout::Rect::new(0, 0, 100, 30),
+        );
+        let source_public = app.public_pane_id(0, source).unwrap();
+        let same_tab_target_public = app.public_pane_id(0, same_tab_target).unwrap();
+        let cross_tab_target_public = app.public_pane_id(0, cross_tab_target).unwrap();
+        let source_layout_before = app.state.workspaces[0].tabs[0].layout.clone();
+        let target_layout_before = app.state.workspaces[0].tabs[second_tab].layout.clone();
+
+        let response = app.handle_layout_rearrange(
+            "cross-tab".into(),
+            LayoutRearrangeParams {
+                operation: LayoutRearrangeOperation::Reposition {
+                    source_pane_id: source_public.clone(),
+                    target_pane_id: cross_tab_target_public,
+                    placement: PaneDirection::Right,
+                    ratio: Some(0.5),
+                },
+                focus: true,
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::LayoutRearrange { rearrange } = success.result else {
+            panic!("expected layout rearrange response");
+        };
+        assert!(!rearrange.changed);
+        assert_eq!(rearrange.reason, Some(LayoutRearrangeReason::CrossTab));
+        assert_eq!(app.state.workspaces[0].tabs[0].layout, source_layout_before);
+        assert_eq!(
+            app.state.workspaces[0].tabs[second_tab].layout,
+            target_layout_before
+        );
+        assert!(app.event_hub.events_after(0).is_empty());
+
+        app.state.workspaces[0].tabs[0].zoomed = true;
+        let response = app.handle_layout_rearrange(
+            "zoomed".into(),
+            LayoutRearrangeParams {
+                operation: LayoutRearrangeOperation::Reposition {
+                    source_pane_id: source_public,
+                    target_pane_id: same_tab_target_public,
+                    placement: PaneDirection::Down,
+                    ratio: Some(0.5),
+                },
+                focus: true,
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::LayoutRearrange { rearrange } = success.result else {
+            panic!("expected layout rearrange response");
+        };
+        assert!(!rearrange.changed);
+        assert_eq!(rearrange.reason, Some(LayoutRearrangeReason::ZoomedTab));
+        assert_eq!(app.state.workspaces[0].tabs[0].layout, source_layout_before);
+        assert!(app.event_hub.events_after(0).is_empty());
     }
 
     #[test]

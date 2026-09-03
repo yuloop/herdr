@@ -138,6 +138,39 @@ pub struct PaneLayoutParams {
     pub pane_id: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LayoutRearrangeParams {
+    pub operation: LayoutRearrangeOperation,
+    #[serde(default)]
+    pub focus: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LayoutRearrangeOperation {
+    Reposition {
+        source_pane_id: String,
+        target_pane_id: String,
+        placement: PaneDirection,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ratio: Option<f32>,
+    },
+    Preset {
+        anchor_pane_id: String,
+        preset: PaneLayoutPreset,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PaneLayoutPreset {
+    Columns,
+    Rows,
+    Grid,
+    MainLeft,
+    MainTop,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]
 pub struct PaneProcessInfoParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -697,6 +730,28 @@ pub struct PaneLayoutSplit {
     pub direction: SplitDirection,
     pub ratio: f32,
     pub rect: PaneLayoutRect,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LayoutRearrangeResult {
+    pub changed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<LayoutRearrangeReason>,
+    pub anchor_pane_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_pane_id: Option<String>,
+    pub focused_pane_id: String,
+    pub layout: PaneLayoutSnapshot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LayoutRearrangeReason {
+    SamePane,
+    CrossTab,
+    ZoomedTab,
+    SinglePane,
+    Unchanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

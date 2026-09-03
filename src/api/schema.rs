@@ -153,6 +153,8 @@ pub enum Method {
     LayoutApply(LayoutApplyParams),
     #[serde(rename = "layout.set_split_ratio")]
     LayoutSetSplitRatio(LayoutSetSplitRatioParams),
+    #[serde(rename = "layout.rearrange")]
+    LayoutRearrange(LayoutRearrangeParams),
     #[serde(rename = "pane.neighbor")]
     PaneNeighbor(PaneNeighborParams),
     #[serde(rename = "pane.edges")]

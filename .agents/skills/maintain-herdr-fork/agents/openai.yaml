@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maintain Herdr Fork"
+  short_description: "Sync upstream, validate Win/Linux, and deploy safely"
+  default_prompt: "Use $maintain-herdr-fork to sync upstream, preserve local patches, validate Windows and Linux, and deploy safely."

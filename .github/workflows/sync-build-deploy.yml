@@ -1,0 +1,954 @@
+name: Sync upstream, build, and deploy
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: herdr-upstream-sync-build-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RUST_TOOLCHAIN_VERSION: 1.96.1
+  CUSTOM_BRANCH: deploy/zh-with-perf
+  UPSTREAM_REPOSITORY: herdrdev/herdr
+  ARTIFACT_NAME: herdr-linux-x86_64
+  WINDOWS_ARTIFACT_NAME: herdr-windows-x86_64.zip
+  HERDR_DEPLOY_HOST: ${{ vars.HERDR_DEPLOY_HOST }}
+  HERDR_DEPLOY_PORT: ${{ vars.HERDR_DEPLOY_PORT }}
+  HERDR_DEPLOY_USER: ${{ vars.HERDR_DEPLOY_USER }}
+  HERDR_DEPLOY_PATH: ${{ vars.HERDR_DEPLOY_PATH }}
+
+jobs:
+  prepare-linux-candidate:
+    name: Prepare and validate Linux candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    outputs:
+      custom_base_sha: ${{ steps.source-state.outputs.custom_base_sha }}
+      custom_sha: ${{ steps.source-state.outputs.custom_sha }}
+      has_upstream_change: ${{ steps.source-state.outputs.has_upstream_change }}
+      upstream_sha: ${{ steps.source-state.outputs.upstream_sha }}
+      skip_pipeline: ${{ steps.source-state.outputs.skip_pipeline }}
+
+    steps:
+      - name: Check out the custom branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ env.CUSTOM_BRANCH }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Initialize automation context
+        shell: bash
+        run: |
+          set -euo pipefail
+          conflicts_file="$RUNNER_TEMP/herdr-conflicts.txt"
+          : > "$conflicts_file"
+          {
+            echo "CONFLICTS_FILE=$conflicts_file"
+            echo "FAILURE_STAGE=initialization"
+            echo "FAILURE_SUMMARY=automation initialization failed"
+            echo "UPSTREAM_SHA=unknown"
+            echo "CUSTOM_BASE_SHA=unknown"
+            echo "CUSTOM_SHA=unknown"
+            echo "HAS_UPSTREAM_CHANGE=false"
+            echo "SKIP_PIPELINE=false"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure and validate deployment SSH material
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.HERDR_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.HERDR_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          {
+            echo "FAILURE_STAGE=ssh-configuration"
+            echo "FAILURE_SUMMARY=deployment SSH variables, key, or known_hosts validation failed"
+          } >> "$GITHUB_ENV"
+
+          for name in HERDR_DEPLOY_HOST HERDR_DEPLOY_PORT HERDR_DEPLOY_USER HERDR_DEPLOY_PATH; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "error: repository variable $name is not configured" >&2
+              exit 1
+            fi
+          done
+          if [[ -z "$DEPLOY_SSH_KEY" || -z "$DEPLOY_KNOWN_HOSTS" ]]; then
+            echo "error: deployment SSH secrets are not configured" >&2
+            exit 1
+          fi
+          [[ "$HERDR_DEPLOY_HOST" =~ ^[0-9A-Za-z.-]+$ ]] || { echo "error: unsafe deployment host" >&2; exit 1; }
+          [[ "$HERDR_DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "error: invalid deployment port" >&2; exit 1; }
+          (( HERDR_DEPLOY_PORT >= 1 && HERDR_DEPLOY_PORT <= 65535 )) || { echo "error: deployment port is out of range" >&2; exit 1; }
+          [[ "$HERDR_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "error: unsafe deployment user" >&2; exit 1; }
+          [[ "$HERDR_DEPLOY_PATH" =~ ^/[0-9A-Za-z._/-]+$ && "$HERDR_DEPLOY_PATH" != "/" && "$HERDR_DEPLOY_PATH" != *".."* ]] || {
+            echo "error: unsafe deployment path" >&2
+            exit 1
+          }
+
+          ssh_dir="$RUNNER_TEMP/herdr-ssh"
+          install -d -m 700 "$ssh_dir"
+          key_path="$ssh_dir/deploy-key"
+          known_hosts_path="$ssh_dir/known_hosts"
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$key_path"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$known_hosts_path"
+          chmod 600 "$key_path" "$known_hosts_path"
+          ssh-keygen -y -f "$key_path" >/dev/null
+
+          host_pattern="$HERDR_DEPLOY_HOST"
+          if [[ "$HERDR_DEPLOY_PORT" != "22" ]]; then
+            host_pattern="[$HERDR_DEPLOY_HOST]:$HERDR_DEPLOY_PORT"
+          fi
+          ssh-keygen -F "$host_pattern" -f "$known_hosts_path" >/dev/null || {
+            echo "error: known_hosts does not contain the configured deployment endpoint" >&2
+            exit 1
+          }
+
+          {
+            echo "DEPLOY_SSH_KEY_PATH=$key_path"
+            echo "DEPLOY_KNOWN_HOSTS_PATH=$known_hosts_path"
+          } >> "$GITHUB_ENV"
+
+      - name: Fetch the fork and upstream master
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "FAILURE_STAGE=fetch"
+            echo "FAILURE_SUMMARY=fetching the fork or upstream master failed"
+          } >> "$GITHUB_ENV"
+
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url upstream "https://github.com/$UPSTREAM_REPOSITORY.git"
+          else
+            git remote add upstream "https://github.com/$UPSTREAM_REPOSITORY.git"
+          fi
+          git remote set-url --push upstream DISABLED
+          git config user.name "herdr-automation[bot]"
+          git config user.email "herdr-automation[bot]@users.noreply.github.com"
+          git fetch --no-tags upstream "+refs/heads/master:refs/remotes/upstream/master"
+          git fetch --no-tags origin \
+            "+refs/heads/master:refs/remotes/origin/master" \
+            "+refs/heads/$CUSTOM_BRANCH:refs/remotes/origin/$CUSTOM_BRANCH"
+
+          upstream_sha="$(git rev-parse refs/remotes/upstream/master)"
+          custom_base_sha="$(git rev-parse "refs/remotes/origin/$CUSTOM_BRANCH")"
+          {
+            echo "UPSTREAM_SHA=$upstream_sha"
+            echo "CUSTOM_BASE_SHA=$custom_base_sha"
+            echo "CUSTOM_SHA=$custom_base_sha"
+          } >> "$GITHUB_ENV"
+
+      - name: Mirror upstream master without rewriting history
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "FAILURE_STAGE=mirror-master"
+            echo "FAILURE_SUMMARY=fork master could not be fast-forwarded to upstream master"
+          } >> "$GITHUB_ENV"
+
+          if ! git merge-base --is-ancestor refs/remotes/origin/master refs/remotes/upstream/master; then
+            echo "error: fork master diverged from upstream; refusing to force-push" >&2
+            exit 1
+          fi
+          if [[ "$(git rev-parse refs/remotes/origin/master)" != "$UPSTREAM_SHA" ]]; then
+            git push origin "refs/remotes/upstream/master:refs/heads/master"
+          fi
+
+      - name: Prepare a temporary merge candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "FAILURE_STAGE=merge"
+            echo "FAILURE_SUMMARY=upstream master could not be merged into the custom branch"
+          } >> "$GITHUB_ENV"
+
+          git switch --detach "$CUSTOM_BASE_SHA"
+          if git merge-base --is-ancestor "$UPSTREAM_SHA" "$CUSTOM_BASE_SHA"; then
+            echo "HAS_UPSTREAM_CHANGE=false" >> "$GITHUB_ENV"
+            echo "CUSTOM_SHA=$CUSTOM_BASE_SHA" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          candidate_branch="automation/candidate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          git switch -c "$candidate_branch"
+          if ! git merge --no-ff "$UPSTREAM_SHA" -m "chore: merge current upstream into local integration branch"; then
+            git diff --name-only --diff-filter=U | sort -u > "$CONFLICTS_FILE"
+            git merge --abort || true
+            {
+              echo "FAILURE_SUMMARY=upstream merge conflict; the custom branch and server were left unchanged"
+              echo "HAS_UPSTREAM_CHANGE=true"
+            } >> "$GITHUB_ENV"
+            exit 1
+          fi
+          candidate_sha="$(git rev-parse HEAD)"
+          {
+            echo "HAS_UPSTREAM_CHANGE=true"
+            echo "CUSTOM_SHA=$candidate_sha"
+          } >> "$GITHUB_ENV"
+
+      - name: Read deployed source state and server health
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "FAILURE_STAGE=ssh-preflight"
+            echo "FAILURE_SUMMARY=the deployment host or running Herdr server failed its preflight check"
+          } >> "$GITHUB_ENV"
+
+          ssh_args=(
+            ssh -i "$DEPLOY_SSH_KEY_PATH"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o "UserKnownHostsFile=$DEPLOY_KNOWN_HOSTS_PATH"
+            -o ConnectTimeout=15
+            -p "$HERDR_DEPLOY_PORT"
+            "$HERDR_DEPLOY_USER@$HERDR_DEPLOY_HOST"
+          )
+          probe_remote() {
+            "${ssh_args[@]}" sh -s -- "$HERDR_DEPLOY_PATH" <<'REMOTE'
+          set -eu
+          target=$1
+          test -x "$target"
+          deployed_sha=
+          if test -r "$target.source-sha"; then
+            deployed_sha=$(sed -n '1p' "$target.source-sha")
+          fi
+          printf '%s\n' "$deployed_sha"
+          exec "$target" status server --json
+          REMOTE
+          }
+          remote_state=
+          for attempt in 1 2 3 4 5; do
+            if remote_state="$(probe_remote)"; then
+              break
+            fi
+            if (( attempt == 5 )); then
+              echo "error: deployment SSH preflight failed after $attempt attempts" >&2
+              exit 1
+            fi
+            delay=$((attempt * 5))
+            echo "::warning::Deployment SSH preflight attempt $attempt failed; retrying in ${delay}s"
+            sleep "$delay"
+          done
+          deployed_sha="$(printf '%s\n' "$remote_state" | sed -n '1p')"
+          server_json="$(printf '%s\n' "$remote_state" | tail -n +2)"
+          if [[ -n "$deployed_sha" && ! "$deployed_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "error: remote deployed source state is invalid" >&2
+            exit 1
+          fi
+          jq -e '
+            .status == "running" and
+            .running == true and
+            .compatible == true and
+            .capabilities.live_handoff == true and
+            .capabilities.detached_server_daemon == true
+          ' <<<"$server_json" >/dev/null
+          echo "DEPLOYED_SHA=$deployed_sha" >> "$GITHUB_ENV"
+
+          if [[ "$HAS_UPSTREAM_CHANGE" == "false" && "$deployed_sha" == "$CUSTOM_BASE_SHA" ]]; then
+            echo "SKIP_PIPELINE=true" >> "$GITHUB_ENV"
+            {
+              echo "### Herdr automation"
+              echo
+              echo "No upstream change; server already runs source \`$CUSTOM_BASE_SHA\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Install Rust
+        if: env.SKIP_PIPELINE != 'true'
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          components: rustfmt,clippy
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install Rust tools
+        if: env.SKIP_PIPELINE != 'true'
+        uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+        with:
+          tool: just,cargo-nextest
+
+      - name: Install Bun
+        if: env.SKIP_PIPELINE != 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install Zig
+        if: env.SKIP_PIPELINE != 'true'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+
+      - name: Install Linux build tools
+        if: env.SKIP_PIPELINE != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "FAILURE_STAGE=toolchain"
+            echo "FAILURE_SUMMARY=installing the official Linux musl build toolchain failed"
+          } >> "$GITHUB_ENV"
+          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
+            sudo sed -i '/azure.archive.ubuntu.com/d' /etc/apt/apt-mirrors.txt
+          fi
+          sudo find /etc/apt/sources.list.d -type f \( -iname '*microsoft*' -o -iname '*azure-cli*' \) -print -delete
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build musl-tools binutils file
+
+      - name: Restore Cargo cache
+        if: env.SKIP_PIPELINE != 'true'
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-bin: false
+          key: fork-automation-x86_64-unknown-linux-musl
+
+      - name: Run source, Rust, maintenance, and integration checks
+        if: env.SKIP_PIPELINE != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "FAILURE_STAGE=tests"
+            echo "FAILURE_SUMMARY=source checks, Clippy, Rust tests, maintenance tests, or integration asset tests failed"
+          } >> "$GITHUB_ENV"
+          git diff --check
+          git diff --check "refs/remotes/upstream/master...HEAD"
+          just ci 'all()'
+          python3 -m unittest \
+            scripts.test_agent_detection_manifest_check \
+            scripts.test_changelog \
+            scripts.test_config_reference_check \
+            scripts.test_cross_platform_gate \
+            scripts.test_docs_translation_parity \
+            scripts.test_i18n_key_check \
+            scripts.test_herdr_automation_issue \
+            scripts.test_herdr_deploy \
+            scripts.test_herdr_deploy_integration \
+            scripts.test_sync_upstream \
+            scripts.test_hermes_integration_asset \
+            scripts.test_package_windows_conpty \
+            scripts.test_preview \
+            scripts.test_vendor_libghostty_vt \
+            scripts.test_vendor_portable_pty
+
+      - name: Build and verify the x86_64 musl artifact
+        if: env.SKIP_PIPELINE != 'true'
+        shell: bash
+        env:
+          LIBGHOSTTY_VT_OPTIMIZE: ReleaseFast
+          LIBGHOSTTY_VT_SIMD: 'true'
+        run: |
+          set -euo pipefail
+          {
+            echo "FAILURE_STAGE=build"
+            echo "FAILURE_SUMMARY=the x86_64-unknown-linux-musl build or artifact validation failed"
+          } >> "$GITHUB_ENV"
+
+          rm -rf .zig-cache vendor/libghostty-vt/.zig-cache vendor/libghostty-vt/zig-out
+          build_id="${GITHUB_RUN_NUMBER}-${CUSTOM_SHA:0:12}-linux-zh"
+          export HERDR_BUILD_CHANNEL=deploy
+          export HERDR_BUILD_ID="$build_id"
+          export HERDR_BUILD_COMMIT="$CUSTOM_SHA"
+          cargo build --release --locked --target x86_64-unknown-linux-musl
+
+          artifact_dir="$GITHUB_WORKSPACE/build-artifacts"
+          artifact="$artifact_dir/$ARTIFACT_NAME"
+          info="$artifact_dir/BUILD_INFO.txt"
+          install -d "$artifact_dir"
+          install -m 755 "target/x86_64-unknown-linux-musl/release/herdr" "$artifact"
+          file "$artifact" > "$info"
+          ldd "$artifact" >> "$info" 2>&1 || true
+          grep -q "statically linked" "$info"
+          if nm -u "$artifact" 2>/dev/null | grep -E '(__cxa|GLIBCXX|CXXABI|_ZSt)'; then
+            echo "error: Linux artifact has unresolved C++ runtime symbols" >&2
+            exit 1
+          fi
+
+          client_json="$("$artifact" status client --json)"
+          expected_version="$(jq -er '.version' <<<"$client_json")"
+          expected_protocol="$(jq -er '.protocol' <<<"$client_json")"
+          [[ "$("$artifact" --version)" == "herdr $expected_version" ]]
+          if update_output="$("$artifact" update 2>&1)"; then
+            echo "error: deploy build unexpectedly allowed official self-update" >&2
+            exit 1
+          fi
+          grep -Fq "self-update is disabled for deploy builds" <<<"$update_output"
+          artifact_sha256="$(sha256sum "$artifact" | awk '{print $1}')"
+          {
+            echo "commit=$CUSTOM_SHA"
+            echo "upstream=$UPSTREAM_SHA"
+            echo "target=x86_64-unknown-linux-musl"
+            echo "rust=$RUST_TOOLCHAIN_VERSION"
+            echo "zig=0.15.2"
+            echo "libghostty_vt_optimize=$LIBGHOSTTY_VT_OPTIMIZE"
+            echo "libghostty_vt_simd=$LIBGHOSTTY_VT_SIMD"
+            echo "version=$expected_version"
+            echo "protocol=$expected_protocol"
+            echo "sha256=$artifact_sha256  $ARTIFACT_NAME"
+          } >> "$info"
+          {
+            echo "EXPECTED_VERSION=$expected_version"
+            echo "EXPECTED_PROTOCOL=$expected_protocol"
+            echo "ARTIFACT_SHA256=$artifact_sha256"
+            echo "ARTIFACT_PATH=$artifact"
+          } >> "$GITHUB_ENV"
+
+      - name: Upload verified Linux artifact
+        if: env.SKIP_PIPELINE != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: herdr-linux-x86_64-${{ env.CUSTOM_SHA }}
+          path: build-artifacts/
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Export the unpushed merge candidate
+        if: env.SKIP_PIPELINE != 'true' && env.HAS_UPSTREAM_CHANGE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "FAILURE_STAGE=candidate-export"
+            echo "FAILURE_SUMMARY=the verified Linux candidate could not be exported for native Windows validation"
+          } >> "$GITHUB_ENV"
+          bundle_dir="$GITHUB_WORKSPACE/build-candidate"
+          bundle="$bundle_dir/candidate.bundle"
+          install -d "$bundle_dir"
+          git branch --force automation/candidate-export "$CUSTOM_SHA"
+          git bundle create "$bundle" \
+            refs/heads/automation/candidate-export \
+            "^$CUSTOM_BASE_SHA"
+          git bundle verify "$bundle"
+
+      - name: Upload the unpushed merge candidate
+        if: env.SKIP_PIPELINE != 'true' && env.HAS_UPSTREAM_CHANGE == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: herdr-sync-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build-candidate/candidate.bundle
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Export verified source state
+        id: source-state
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "custom_base_sha=$CUSTOM_BASE_SHA"
+            echo "custom_sha=$CUSTOM_SHA"
+            echo "has_upstream_change=$HAS_UPSTREAM_CHANGE"
+            echo "upstream_sha=$UPSTREAM_SHA"
+            echo "skip_pipeline=$SKIP_PIPELINE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update the unique automation failure issue
+        if: failure()
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/herdr_automation_issue.py \
+            --repository "$GITHUB_REPOSITORY" \
+            failure \
+            --stage "${FAILURE_STAGE:-unknown}" \
+            --upstream-sha "${UPSTREAM_SHA:-unknown}" \
+            --custom-sha "${CUSTOM_SHA:-unknown}" \
+            --conflicts-file "${CONFLICTS_FILE:-}" \
+            --summary "${FAILURE_SUMMARY:-automation failed; inspect the workflow log}" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Remove temporary SSH material
+        if: always()
+        shell: bash
+        run: |
+          ssh_dir="$RUNNER_TEMP/herdr-ssh"
+          if [[ "$ssh_dir" == "$RUNNER_TEMP/herdr-ssh" ]]; then
+            rm -f -- "$ssh_dir/deploy-key" "$ssh_dir/known_hosts"
+            rmdir -- "$ssh_dir" 2>/dev/null || true
+          fi
+
+  build-windows:
+    name: Build localized Windows x86_64 package
+    needs: prepare-linux-candidate
+    if: needs.prepare-linux-candidate.outputs.skip_pipeline != 'true'
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      CUSTOM_BASE_SHA: ${{ needs.prepare-linux-candidate.outputs.custom_base_sha }}
+      HAS_UPSTREAM_CHANGE: ${{ needs.prepare-linux-candidate.outputs.has_upstream_change }}
+      SOURCE_SHA: ${{ needs.prepare-linux-candidate.outputs.custom_sha }}
+      UPSTREAM_SHA: ${{ needs.prepare-linux-candidate.outputs.upstream_sha }}
+      LIBGHOSTTY_VT_OPTIMIZE: ReleaseFast
+      LIBGHOSTTY_VT_SIMD: 'true'
+      HERDR_BUILD_CHANNEL: deploy
+      HERDR_BUILD_ID: ${{ github.run_number }}-${{ needs.prepare-linux-candidate.outputs.custom_sha }}-windows-zh
+      HERDR_BUILD_COMMIT: ${{ needs.prepare-linux-candidate.outputs.custom_sha }}
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}\vendor\libghostty-vt\.zig-cache
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}\vendor\libghostty-vt\.zig-cache
+
+    steps:
+      - name: Check out the custom branch base
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.prepare-linux-candidate.outputs.custom_base_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download the unpushed merge candidate
+        if: env.HAS_UPSTREAM_CHANGE == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: herdr-sync-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build-candidate
+
+      - name: Check out the exact Linux-verified candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:HAS_UPSTREAM_CHANGE -eq "true") {
+            $bundle = Join-Path $PWD "build-candidate\candidate.bundle"
+            git bundle verify $bundle
+            if ($LASTEXITCODE -ne 0) { throw "candidate bundle verification failed" }
+            git fetch $bundle "refs/heads/automation/candidate-export:refs/remotes/candidate/export"
+            if ($LASTEXITCODE -ne 0) { throw "candidate bundle import failed" }
+          }
+          git switch --detach $env:SOURCE_SHA
+          if ($LASTEXITCODE -ne 0) { throw "candidate checkout failed" }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:SOURCE_SHA) {
+            throw "candidate SHA mismatch: expected $env:SOURCE_SHA, got $actual"
+          }
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          components: rustfmt,clippy
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+          use-cache: false
+
+      - name: Restore Cargo cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-bin: false
+          key: fork-automation-x86_64-pc-windows-msvc
+
+      - name: Remove stale Windows build caches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Remove-Item -Recurse -Force .zig-cache -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force vendor/libghostty-vt/.zig-cache -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force vendor/libghostty-vt/zig-out -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force target/x86_64-pc-windows-msvc/release -ErrorAction SilentlyContinue
+
+      - name: Run native Windows checks
+        shell: pwsh
+        run: .\scripts\windows_check.ps1 -Mode check
+
+      - name: Build localized Windows release
+        shell: pwsh
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+
+      - name: Verify Windows binary and Simplified Chinese locale
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = (Resolve-Path -LiteralPath "target\x86_64-pc-windows-msvc\release\herdr.exe").Path
+          $client = (& $exe status client --json | ConvertFrom-Json)
+          if ((& $exe --version) -ne "herdr $($client.version)") {
+            throw "Windows binary version output does not match status client metadata"
+          }
+
+          $updateOutput = (& $exe update 2>&1 | Out-String)
+          if ($LASTEXITCODE -eq 0) {
+            throw "deploy build unexpectedly allowed official self-update"
+          }
+          if (-not $updateOutput.Contains("self-update is disabled for deploy builds")) {
+            throw "deploy build did not report the expected self-update protection: $updateOutput"
+          }
+
+          $config = Join-Path $env:RUNNER_TEMP "herdr-zh-config.toml"
+          "[ui]`nlanguage = `"zh`"" | Set-Content -LiteralPath $config -Encoding utf8
+          try {
+            $env:HERDR_CONFIG_PATH = $config
+            $help = (& $exe --help | Out-String)
+          } finally {
+            Remove-Item Env:HERDR_CONFIG_PATH -ErrorAction SilentlyContinue
+          }
+          if (-not $help.Contains("AI 编程智能体的终端工作区管理器")) {
+            throw "Windows release did not load the embedded Simplified Chinese locale"
+          }
+
+          "HERDR_WINDOWS_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "EXPECTED_VERSION=$($client.version)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "EXPECTED_PROTOCOL=$($client.protocol)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build and verify official ConPTY package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $package = Join-Path $env:RUNNER_TEMP "Microsoft.Windows.Console.ConPTY.nupkg"
+          $stage = Join-Path $env:RUNNER_TEMP "herdr-windows-x86_64"
+          $artifactDir = Join-Path $PWD "build-artifacts-windows"
+          $archive = Join-Path $artifactDir $env:WINDOWS_ARTIFACT_NAME
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+          .\scripts\package_windows_conpty.ps1 `
+            -HerdrExe $env:HERDR_WINDOWS_EXE `
+            -PackagePath $package `
+            -StageDir $stage `
+            -OutputPath $archive
+
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+          @(
+            "commit=$env:SOURCE_SHA"
+            "upstream=$env:UPSTREAM_SHA"
+            "target=x86_64-pc-windows-msvc"
+            "rust=$env:RUST_TOOLCHAIN_VERSION"
+            "zig=0.15.2"
+            "libghostty_vt_optimize=$env:LIBGHOSTTY_VT_OPTIMIZE"
+            "libghostty_vt_simd=$env:LIBGHOSTTY_VT_SIMD"
+            "language=zh (verified)"
+            "version=$env:EXPECTED_VERSION"
+            "protocol=$env:EXPECTED_PROTOCOL"
+            "sha256=$hash  $env:WINDOWS_ARTIFACT_NAME"
+          ) | Out-File -LiteralPath (Join-Path $artifactDir "BUILD_INFO.txt") -Encoding utf8
+          "HERDR_CONPTY_PACKAGE_DIR=$stage" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "HERDR_WINDOWS_ARCHIVE=$archive" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Probe enhanced pane input with bundled ConPTY
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Join-Path $env:HERDR_CONPTY_PACKAGE_DIR "herdr.exe"
+          $consoleHost = Join-Path $env:HERDR_CONPTY_PACKAGE_DIR "conpty\x64\OpenConsole.exe"
+          .\scripts\windows_conpty_enhanced_input_probe.ps1 `
+            -ExePath $exe `
+            -Session "automation-windows-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT" `
+            -ExpectedConsoleHostPath $consoleHost
+
+      - name: Test packaged installer and repair with Windows PowerShell 5.1
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
+            .\scripts\windows_install_conpty_package_test.ps1 `
+            -ArchivePath $env:HERDR_WINDOWS_ARCHIVE
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows PowerShell installer test failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload verified Windows artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: herdr-windows-x86_64-${{ needs.prepare-linux-candidate.outputs.custom_sha }}
+          path: build-artifacts-windows/
+          retention-days: 14
+          if-no-files-found: error
+
+  promote-and-deploy:
+    name: Promote dual-platform candidate and deploy Linux
+    needs: [prepare-linux-candidate, build-windows]
+    if: ${{ needs.prepare-linux-candidate.outputs.skip_pipeline != 'true' && needs.build-windows.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CUSTOM_BASE_SHA: ${{ needs.prepare-linux-candidate.outputs.custom_base_sha }}
+      HAS_UPSTREAM_CHANGE: ${{ needs.prepare-linux-candidate.outputs.has_upstream_change }}
+      SOURCE_SHA: ${{ needs.prepare-linux-candidate.outputs.custom_sha }}
+      UPSTREAM_SHA: ${{ needs.prepare-linux-candidate.outputs.upstream_sha }}
+
+    steps:
+      - name: Check out the custom branch base
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.prepare-linux-candidate.outputs.custom_base_sha }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Download the unpushed merge candidate
+        if: env.HAS_UPSTREAM_CHANGE == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: herdr-sync-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build-candidate
+
+      - name: Check out the dual-platform verified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$HAS_UPSTREAM_CHANGE" == "true" ]]; then
+            bundle="$GITHUB_WORKSPACE/build-candidate/candidate.bundle"
+            git bundle verify "$bundle"
+            git fetch "$bundle" \
+              "refs/heads/automation/candidate-export:refs/remotes/candidate/export"
+          fi
+          git switch --detach "$SOURCE_SHA"
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+
+      - name: Download the verified Linux artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: herdr-linux-x86_64-${{ needs.prepare-linux-candidate.outputs.custom_sha }}
+          path: build-artifacts
+
+      - name: Verify downloaded Linux artifact metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="$GITHUB_WORKSPACE/build-artifacts/$ARTIFACT_NAME"
+          info="$GITHUB_WORKSPACE/build-artifacts/BUILD_INFO.txt"
+          test -f "$artifact"
+          test -f "$info"
+          chmod 755 "$artifact"
+
+          metadata() {
+            sed -n "s/^$1=//p" "$info" | tail -n 1
+          }
+          expected_commit="$(metadata commit)"
+          expected_upstream="$(metadata upstream)"
+          expected_version="$(metadata version)"
+          expected_protocol="$(metadata protocol)"
+          expected_hash="$(sed -n 's/^sha256=\([0-9a-f]\{64\}\)  .*$/\1/p' "$info" | tail -n 1)"
+          actual_hash="$(sha256sum "$artifact" | awk '{print $1}')"
+
+          [[ "$expected_commit" == "$SOURCE_SHA" ]]
+          [[ "$expected_upstream" == "$UPSTREAM_SHA" ]]
+          [[ -n "$expected_version" ]]
+          [[ -n "$expected_protocol" ]]
+          [[ "$expected_hash" == "$actual_hash" ]]
+          [[ "$("$artifact" --version)" == "herdr $expected_version" ]]
+          {
+            echo "ARTIFACT_PATH=$artifact"
+            echo "EXPECTED_VERSION=$expected_version"
+            echo "EXPECTED_PROTOCOL=$expected_protocol"
+            echo "ARTIFACT_SHA256=$actual_hash"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure and validate deployment SSH material
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.HERDR_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.HERDR_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          {
+            echo "FAILURE_STAGE=ssh-configuration"
+            echo "FAILURE_SUMMARY=deployment SSH variables, key, or known_hosts validation failed"
+          } >> "$GITHUB_ENV"
+
+          for name in HERDR_DEPLOY_HOST HERDR_DEPLOY_PORT HERDR_DEPLOY_USER HERDR_DEPLOY_PATH; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "error: repository variable $name is not configured" >&2
+              exit 1
+            fi
+          done
+          if [[ -z "$DEPLOY_SSH_KEY" || -z "$DEPLOY_KNOWN_HOSTS" ]]; then
+            echo "error: deployment SSH secrets are not configured" >&2
+            exit 1
+          fi
+          [[ "$HERDR_DEPLOY_HOST" =~ ^[0-9A-Za-z.-]+$ ]] || { echo "error: unsafe deployment host" >&2; exit 1; }
+          [[ "$HERDR_DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "error: invalid deployment port" >&2; exit 1; }
+          (( HERDR_DEPLOY_PORT >= 1 && HERDR_DEPLOY_PORT <= 65535 )) || { echo "error: deployment port is out of range" >&2; exit 1; }
+          [[ "$HERDR_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "error: unsafe deployment user" >&2; exit 1; }
+          [[ "$HERDR_DEPLOY_PATH" =~ ^/[0-9A-Za-z._/-]+$ && "$HERDR_DEPLOY_PATH" != "/" && "$HERDR_DEPLOY_PATH" != *".."* ]] || {
+            echo "error: unsafe deployment path" >&2
+            exit 1
+          }
+
+          ssh_dir="$RUNNER_TEMP/herdr-ssh"
+          install -d -m 700 "$ssh_dir"
+          key_path="$ssh_dir/deploy-key"
+          known_hosts_path="$ssh_dir/known_hosts"
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$key_path"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$known_hosts_path"
+          chmod 600 "$key_path" "$known_hosts_path"
+          ssh-keygen -y -f "$key_path" >/dev/null
+
+          host_pattern="$HERDR_DEPLOY_HOST"
+          if [[ "$HERDR_DEPLOY_PORT" != "22" ]]; then
+            host_pattern="[$HERDR_DEPLOY_HOST]:$HERDR_DEPLOY_PORT"
+          fi
+          ssh-keygen -F "$host_pattern" -f "$known_hosts_path" >/dev/null || {
+            echo "error: known_hosts does not contain the configured deployment endpoint" >&2
+            exit 1
+          }
+          {
+            echo "DEPLOY_SSH_KEY_PATH=$key_path"
+            echo "DEPLOY_KNOWN_HOSTS_PATH=$known_hosts_path"
+          } >> "$GITHUB_ENV"
+
+      - name: Revalidate the deployment target before promotion
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "FAILURE_STAGE=ssh-preflight"
+            echo "FAILURE_SUMMARY=the deployment host changed or failed its final preflight check"
+          } >> "$GITHUB_ENV"
+          ssh_args=(
+            ssh -i "$DEPLOY_SSH_KEY_PATH"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o "UserKnownHostsFile=$DEPLOY_KNOWN_HOSTS_PATH"
+            -o ConnectTimeout=15
+            -p "$HERDR_DEPLOY_PORT"
+            "$HERDR_DEPLOY_USER@$HERDR_DEPLOY_HOST"
+          )
+          server_json="$("${ssh_args[@]}" "$HERDR_DEPLOY_PATH" status server --json)"
+          jq -e '
+            .status == "running" and
+            .running == true and
+            .compatible == true and
+            .capabilities.live_handoff == true and
+            .capabilities.detached_server_daemon == true
+          ' <<<"$server_json" >/dev/null
+
+      - name: Advance the custom branch after both platform gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "FAILURE_STAGE=push-custom-branch"
+            echo "FAILURE_SUMMARY=the dual-platform candidate could not be fast-forwarded onto the custom branch"
+          } >> "$GITHUB_ENV"
+          git fetch --no-tags origin "+refs/heads/$CUSTOM_BRANCH:refs/remotes/origin/$CUSTOM_BRANCH"
+          current_remote="$(git rev-parse "refs/remotes/origin/$CUSTOM_BRANCH")"
+          if [[ "$current_remote" != "$CUSTOM_BASE_SHA" ]]; then
+            echo "error: custom branch advanced during validation; refusing to deploy stale source" >&2
+            exit 1
+          fi
+          if [[ "$HAS_UPSTREAM_CHANGE" == "true" ]]; then
+            git push origin "HEAD:refs/heads/$CUSTOM_BRANCH"
+          fi
+
+      - name: Deploy Linux with live handoff and rollback protection
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "FAILURE_STAGE=deploy"
+            echo "FAILURE_SUMMARY=SSH upload, live handoff, deployment health checks, or rollback failed"
+          } >> "$GITHUB_ENV"
+
+          remote_stage="$HERDR_DEPLOY_PATH.incoming.$GITHUB_RUN_ID.$GITHUB_RUN_ATTEMPT"
+          ssh_options=(
+            -i "$DEPLOY_SSH_KEY_PATH"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o "UserKnownHostsFile=$DEPLOY_KNOWN_HOSTS_PATH"
+            -o ConnectTimeout=15
+          )
+          cleanup_stage() {
+            ssh "${ssh_options[@]}" -p "$HERDR_DEPLOY_PORT" \
+              "$HERDR_DEPLOY_USER@$HERDR_DEPLOY_HOST" \
+              "rm -f -- '$remote_stage'" >/dev/null 2>&1 || true
+          }
+          trap cleanup_stage EXIT
+          scp -q "${ssh_options[@]}" -P "$HERDR_DEPLOY_PORT" \
+            "$ARTIFACT_PATH" \
+            "$HERDR_DEPLOY_USER@$HERDR_DEPLOY_HOST:$remote_stage"
+          ssh "${ssh_options[@]}" -p "$HERDR_DEPLOY_PORT" \
+            "$HERDR_DEPLOY_USER@$HERDR_DEPLOY_HOST" \
+            python3 - \
+            "$HERDR_DEPLOY_PATH" \
+            "$remote_stage" \
+            "$SOURCE_SHA" \
+            "$EXPECTED_VERSION" \
+            "$EXPECTED_PROTOCOL" \
+            "$ARTIFACT_SHA256" \
+            < scripts/herdr_deploy.py
+          trap - EXIT
+
+      - name: Update the unique automation failure issue
+        if: failure()
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/herdr_automation_issue.py \
+            --repository "$GITHUB_REPOSITORY" \
+            failure \
+            --stage "${FAILURE_STAGE:-promotion}" \
+            --upstream-sha "$UPSTREAM_SHA" \
+            --custom-sha "$SOURCE_SHA" \
+            --summary "${FAILURE_SUMMARY:-dual-platform promotion or deployment failed}" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Remove temporary SSH material
+        if: always()
+        shell: bash
+        run: |
+          ssh_dir="$RUNNER_TEMP/herdr-ssh"
+          if [[ "$ssh_dir" == "$RUNNER_TEMP/herdr-ssh" ]]; then
+            rm -f -- "$ssh_dir/deploy-key" "$ssh_dir/known_hosts"
+            rmdir -- "$ssh_dir" 2>/dev/null || true
+          fi
+
+  report-automation-status:
+    name: Report combined automation status
+    needs: [prepare-linux-candidate, build-windows, promote-and-deploy]
+    if: ${{ always() && needs.prepare-linux-candidate.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out automation reporting script
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.prepare-linux-candidate.outputs.custom_base_sha }}
+          persist-credentials: false
+
+      - name: Close the automation issue after full recovery
+        if: ${{ (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped') && (needs.promote-and-deploy.result == 'success' || needs.promote-and-deploy.result == 'skipped') }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/herdr_automation_issue.py \
+            --repository "$GITHUB_REPOSITORY" \
+            recover \
+            --upstream-sha "${{ needs.prepare-linux-candidate.outputs.upstream_sha }}" \
+            --custom-sha "${{ needs.prepare-linux-candidate.outputs.custom_sha }}" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Update the unique automation issue for a Windows failure
+        if: needs.build-windows.result != 'success' && needs.build-windows.result != 'skipped'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/herdr_automation_issue.py \
+            --repository "$GITHUB_REPOSITORY" \
+            failure \
+            --stage "windows-build" \
+            --upstream-sha "${{ needs.prepare-linux-candidate.outputs.upstream_sha }}" \
+            --custom-sha "${{ needs.prepare-linux-candidate.outputs.custom_sha }}" \
+            --summary "the localized Windows x86_64 release, ConPTY package, or package verification failed" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

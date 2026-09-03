@@ -24,6 +24,7 @@ mod detect;
 mod events;
 mod ghostty;
 mod handoff_runtime;
+mod i18n;
 mod input;
 mod integration;
 mod ipc;
@@ -60,6 +61,8 @@ mod ui;
 mod update;
 mod workspace;
 mod worktree;
+
+rust_i18n::i18n!("locales", fallback = "en");
 
 const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Place this file at ~/.config/herdr/config.toml
@@ -352,6 +355,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"
 
+# UI language: "zh" for 简体中文 (default) or "en" for English.
+# language = "zh"
+
 # Background notification popup delivery
 [ui.toast]
 # off = disable pop-up notifications
@@ -541,6 +547,13 @@ fn main() -> io::Result<()> {
 
     if args.get(1).map(|s| s.as_str()) == Some("server") {
         return server::headless::run_server();
+    }
+
+    // CLI 子命令（update/status 等）分发前先应用语言设置，确保命令输出也使用
+    // config.toml 中 ui.language 指定的 locale。
+    {
+        let early_config = config::Config::load();
+        i18n::apply_locale(&early_config.config.ui.language);
     }
 
     // Hidden client mode: connect to an existing server's client socket.
@@ -763,6 +776,7 @@ fn main() -> io::Result<()> {
 
     let loaded_config = config::Config::load();
     exit_if_nested_disabled(&loaded_config.config);
+    i18n::apply_locale(&loaded_config.config.ui.language);
 
     if let Err(err) = server::autodetect::auto_detect_launch() {
         eprintln!("herdr: {err}");

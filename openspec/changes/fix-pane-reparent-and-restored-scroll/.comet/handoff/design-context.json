@@ -1,0 +1,15 @@
+{
+  "change": "fix-pane-reparent-and-restored-scroll",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "119aa838f272c14549940b44ebe078f98260ed8a5bbbd171a4032c68c3dcfb7d",
+  "files": [
+    { "path": "openspec/changes/fix-pane-reparent-and-restored-scroll/proposal.md", "sha256": "189c35e821e07e6c563e58ab1ab77bd426067ebbf19c2b88668f97de84ad3029" },
+    { "path": "openspec/changes/fix-pane-reparent-and-restored-scroll/design.md", "sha256": "8a1d8255a103cb4e67375e8223efcbce2c754e642f3cbad8a0d34e99da09584b" },
+    { "path": "openspec/changes/fix-pane-reparent-and-restored-scroll/tasks.md", "sha256": "092632c754fb667fbd33cc5b17c2c5a566672d9e20f87a867dbb3fedd16dd5a0" },
+    { "path": "openspec/changes/fix-pane-reparent-and-restored-scroll/specs/interactive-pane-reparenting/spec.md", "sha256": "46716d6edc5672eb0d9825c8d1a3f6a0aa430b3ac6246ded8ca301ae3e21198f" },
+    { "path": "openspec/changes/fix-pane-reparent-and-restored-scroll/specs/restored-cli-navigation/spec.md", "sha256": "38468f9f2b4d3a9fb896b36b0c41a76b903bf43323c26b3f67567aef99ec930d" }
+  ]
+}

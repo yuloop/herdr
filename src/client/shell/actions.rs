@@ -177,8 +177,7 @@ impl ClientShellState {
                 });
                 let Some(command_id) = command_id else {
                     self.endpoint_error = Some(
-                        "custom command is not available on this endpoint; reload configuration"
-                            .to_owned(),
+                        rust_i18n::t!("endpoint.custom_unavailable").to_string(),
                     );
                     outcome.repaint = true;
                     return;
@@ -416,10 +415,9 @@ impl ClientShellState {
             outcome.repaint |= self.push_endpoint_notice(
                 ClientEndpointNoticeKind::Unsupported,
                 method_name.clone(),
-                "Action unavailable",
-                format!(
-                    "This server does not support {method_name} yet. Update and restart it to enable this action."
-                ),
+                rust_i18n::t!("endpoint.action_unavailable").to_string(),
+                rust_i18n::t!("endpoint.unsupported_body", method = method_name.clone())
+                    .to_string(),
             );
             return false;
         }
@@ -463,7 +461,7 @@ impl ClientShellState {
         self.push_endpoint_notice(
             ClientEndpointNoticeKind::Rejected,
             "paste_rejected",
-            "Paste rejected",
+            rust_i18n::t!("endpoint.paste_rejected").to_string(),
             message,
         )
     }
@@ -503,19 +501,23 @@ impl ClientShellState {
                     "endpoint_timeout" => (
                         ClientEndpointNoticeKind::Timeout,
                         pending.method_name.clone(),
-                        "Server timed out",
-                        format!("This server did not respond to {}.", pending.method_name),
+                        rust_i18n::t!("endpoint.server_timeout").to_string(),
+                        rust_i18n::t!(
+                            "endpoint.timeout_body",
+                            method = pending.method_name.clone()
+                        )
+                        .to_string(),
                     ),
                     "server_unavailable" => (
                         ClientEndpointNoticeKind::Unavailable,
                         "server".to_owned(),
-                        "Server unavailable",
+                        rust_i18n::t!("endpoint.server_unavailable").to_string(),
                         error.message.clone(),
                     ),
                     _ => (
                         ClientEndpointNoticeKind::Rejected,
                         format!("{}:{code}", pending.method_name),
-                        "Action rejected",
+                        rust_i18n::t!("endpoint.action_rejected").to_string(),
                         error.message.clone(),
                     ),
                 };

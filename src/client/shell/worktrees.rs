@@ -200,8 +200,7 @@ impl ClientShellState {
         let kind = match action {
             KeybindAction::NewWorktree | KeybindAction::OpenWorktree if linked => {
                 self.endpoint_error = Some(
-                    "New and open worktree actions start from the repo parent workspace."
-                        .to_owned(),
+                    rust_i18n::t!("dialog.worktree_parent_only").to_string(),
                 );
                 outcome.repaint = true;
                 return;
@@ -214,7 +213,7 @@ impl ClientShellState {
             },
             KeybindAction::RemoveWorktree if !linked => {
                 self.endpoint_error =
-                    Some("This workspace is not a Herdr-managed worktree checkout.".to_owned());
+                    Some(rust_i18n::t!("dialog.worktree_not_managed").to_string());
                 outcome.repaint = true;
                 return;
             }
@@ -263,7 +262,7 @@ impl ClientShellState {
         }
         let branch = create.branch.trim().to_owned();
         if branch.is_empty() {
-            create.error = Some("branch is required".to_owned());
+            create.error = Some(rust_i18n::t!("dialog.branch_required").to_string());
             outcome.repaint = true;
             return;
         }
@@ -439,7 +438,7 @@ impl ClientShellState {
                     })
                     .collect::<Vec<_>>();
                 if entries.is_empty() {
-                    self.endpoint_error = Some("No Git worktrees found for this repo.".to_owned());
+                    self.endpoint_error = Some(rust_i18n::t!("dialog.no_worktrees").to_string());
                 } else {
                     self.overlay = Some(ClientShellOverlay::WorktreeOpen(
                         ClientWorktreeOpenOverlay {
@@ -475,7 +474,7 @@ impl ClientShellState {
                     ));
                 } else {
                     self.endpoint_error =
-                        Some("This workspace is not a Herdr-managed worktree checkout.".to_owned());
+                        Some(rust_i18n::t!("dialog.worktree_not_managed").to_string());
                 }
                 true
             }

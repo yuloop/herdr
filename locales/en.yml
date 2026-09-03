@@ -350,6 +350,21 @@ dialog:
   panes_count: "%{count} panes"
   one_workspace: "1 workspace, "
   workspaces_count: "%{count} workspaces, "
+  worktree_parent_only: "New and open worktree actions start from the repo parent workspace."
+  worktree_not_managed: "This workspace is not a Herdr-managed worktree checkout."
+  branch_required: "branch is required"
+  no_worktrees: "No Git worktrees found for this repo."
+
+# endpoint 端点通知 (shell/actions.rs)
+endpoint:
+  custom_unavailable: "custom command is not available on this endpoint; reload configuration"
+  action_unavailable: "Action unavailable"
+  unsupported_body: "This server does not support %{method} yet. Update and restart it to enable this action."
+  paste_rejected: "Paste rejected"
+  server_timeout: "Server timed out"
+  timeout_body: "This server did not respond to %{method}."
+  server_unavailable: "Server unavailable"
+  action_rejected: "Action rejected"
 
 # settings 设置面板 (settings.rs)
 settings:

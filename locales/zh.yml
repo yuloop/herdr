@@ -350,6 +350,21 @@ dialog:
   panes_count: "%{count} 个窗格"
   one_workspace: "1 个工作区，"
   workspaces_count: "%{count} 个工作区，"
+  worktree_parent_only: "新建和打开工作树操作请从仓库父工作区发起。"
+  worktree_not_managed: "此工作区不是 Herdr 管理的工作树检出。"
+  branch_required: "分支为必填项"
+  no_worktrees: "此仓库没有 Git 工作树。"
+
+# endpoint 端点通知 (shell/actions.rs)
+endpoint:
+  custom_unavailable: "自定义命令在此端点不可用；请重新加载配置"
+  action_unavailable: "操作不可用"
+  unsupported_body: "此服务器暂不支持 %{method}，请更新并重启以启用此操作。"
+  paste_rejected: "粘贴被拒绝"
+  server_timeout: "服务器超时"
+  timeout_body: "此服务器未响应 %{method}。"
+  server_unavailable: "服务器不可用"
+  action_rejected: "操作被拒绝"
 
 # settings 设置面板 (settings.rs)
 settings:

@@ -1210,6 +1210,8 @@ mod tests {
                                 value: "opencode-session".into(),
                             }),
                             launch_argv: None,
+                            origin_workspace_id: None,
+                            origin_workspace_label: None,
                         },
                     )]),
                     zoomed: false,
@@ -1291,6 +1293,8 @@ mod tests {
                                 managed_agent_kind: None,
                                 agent_session: None,
                                 launch_argv: None,
+                                origin_workspace_id: None,
+                                origin_workspace_label: None,
                             },
                         ),
                         (
@@ -1302,6 +1306,8 @@ mod tests {
                                 managed_agent_kind: None,
                                 agent_session: None,
                                 launch_argv: None,
+                                origin_workspace_id: None,
+                                origin_workspace_label: None,
                             },
                         ),
                     ]),
@@ -1355,6 +1361,8 @@ mod tests {
                     managed_agent_kind: None,
                     agent_session: None,
                     launch_argv: None,
+                    origin_workspace_id: None,
+                    origin_workspace_label: None,
                 },
             )
         };
@@ -1370,6 +1378,8 @@ mod tests {
                 value: "codex-session".into(),
             }),
             launch_argv: None,
+            origin_workspace_id: None,
+            origin_workspace_label: None,
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1521,6 +1531,8 @@ mod tests {
                                 value: "codex-session".into(),
                             }),
                             launch_argv: None,
+                            origin_workspace_id: None,
+                            origin_workspace_label: None,
                         },
                     )]),
                     zoomed: false,
@@ -1682,6 +1694,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                origin_workspace_id: None,
+                origin_workspace_label: None,
             },
         );
         let history = SessionHistorySnapshot {

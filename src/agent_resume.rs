@@ -601,6 +601,9 @@ mod tests {
                 .unwrap();
         assert_eq!(session_ref.kind, AgentSessionRefKind::Id);
         assert_eq!(session_ref.value, "agy-id");
+        assert!(
+            session_ref_from_report("custom:qwen", "qwen", Some("qwen-id".into()), None).is_none()
+        );
     }
 
     #[test]
@@ -661,6 +664,9 @@ mod tests {
 
         let devin_plan = plan("herdr:devin", "devin", &AgentSessionRef::id(id).unwrap()).unwrap();
         assert_eq!(devin_plan.argv, vec!["devin", "--resume", id]);
+
+        let qwen_plan = plan("herdr:qwen", "qwen", &AgentSessionRef::id(id).unwrap()).unwrap();
+        assert_eq!(qwen_plan.argv, vec!["qwen", "--resume", id]);
     }
 
     #[test]
@@ -670,6 +676,7 @@ mod tests {
         let kilo_session = absolute_test_path("kilo-session");
         let copilot_session = absolute_test_path("copilot-session");
         let devin_session = absolute_test_path("devin-session");
+        let qwen_session = absolute_test_path("qwen-session");
         assert!(plan(
             "herdr:hermes",
             "hermes",
@@ -698,6 +705,12 @@ mod tests {
             "herdr:devin",
             "devin",
             &AgentSessionRef::path(&devin_session).unwrap()
+        )
+        .is_none());
+        assert!(plan(
+            "herdr:qwen",
+            "qwen",
+            &AgentSessionRef::path(&qwen_session).unwrap()
         )
         .is_none());
         assert!(session_ref_from_snapshot(
@@ -756,5 +769,12 @@ mod tests {
             &AgentSessionRef::path(&agy_session).unwrap()
         )
         .is_none());
+        assert!(session_ref_from_snapshot(
+            "herdr:qwen",
+            "qwen",
+            AgentSessionRefKind::Id,
+            "qwen-session"
+        )
+        .is_some());
     }
 }

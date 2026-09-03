@@ -160,6 +160,10 @@ cli:
   pane_match_lines_help: "将被搜索的快照限制为 N 行"
   pane_match_raw_help: "匹配时保留 ANSI 转义序列"
   terminal_control_about: "控制终端流"
+  nested_disabled: "默认禁用嵌套 herdr。"
+  nested_hint: "如需启用请查看配置。"
+  run_help_for_usage: "运行 'herdr --help' 查看用法"
+  remote_only_default: "--remote 只能与默认启动命令一起使用"
 
 # TUI 通用词汇
 common:

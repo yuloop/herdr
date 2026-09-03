@@ -533,7 +533,7 @@ fn render_onboarding_overlay(b: &mut Buffer, p: &Palette) -> Option<OverlayRende
         stack.header.x,
         stack.header.y,
         stack.header.width,
-        crate::ui::ONBOARDING_TITLE,
+        &crate::ui::onboarding_title(),
         title,
     );
     put_text(
@@ -541,12 +541,12 @@ fn render_onboarding_overlay(b: &mut Buffer, p: &Palette) -> Option<OverlayRende
         stack.header.x,
         stack.header.y.saturating_add(1),
         stack.header.width,
-        crate::ui::ONBOARDING_SUBTITLE,
+        &crate::ui::onboarding_subtitle(),
         muted,
     );
 
     let content = stack.content;
-    for (offset, line) in crate::ui::ONBOARDING_DESCRIPTION.iter().enumerate() {
+    for (offset, line) in crate::ui::onboarding_description().iter().enumerate() {
         put_text(
             b,
             content.x,
@@ -557,14 +557,16 @@ fn render_onboarding_overlay(b: &mut Buffer, p: &Palette) -> Option<OverlayRende
         );
     }
 
+    let prefix_suffix = crate::ui::onboarding_prefix_suffix();
+    let help_suffix = crate::ui::onboarding_help_suffix();
     let key_y = content.y.saturating_add(4);
     let mut key_x = content.x;
     for (value, style) in [
         ("  ", base),
         (crate::ui::ONBOARDING_PREFIX_LABEL, accent),
-        (crate::ui::ONBOARDING_PREFIX_SUFFIX, text),
+        (prefix_suffix.as_str(), text),
         (crate::ui::ONBOARDING_HELP_LABEL, accent),
-        (crate::ui::ONBOARDING_HELP_SUFFIX, text),
+        (help_suffix.as_str(), text),
     ] {
         let width = display_width(value);
         put_text(
@@ -582,7 +584,7 @@ fn render_onboarding_overlay(b: &mut Buffer, p: &Palette) -> Option<OverlayRende
         content.x,
         content.y.saturating_add(5),
         content.width,
-        crate::ui::ONBOARDING_NEXT,
+        &crate::ui::onboarding_next(),
         text,
     );
 
@@ -590,7 +592,7 @@ fn render_onboarding_overlay(b: &mut Buffer, p: &Palette) -> Option<OverlayRende
     button(
         b,
         primary,
-        " ↵ continue ",
+        &crate::ui::onboarding_continue_label(),
         Style::default()
             .fg(contrast(p))
             .bg(p.accent)

@@ -160,6 +160,10 @@ cli:
   pane_match_lines_help: "Restrict the searched snapshot to N lines"
   pane_match_raw_help: "Keep ANSI escape sequences while matching"
   terminal_control_about: "Control a terminal stream"
+  nested_disabled: "nested herdr is disabled by default."
+  nested_hint: "see configuration if you want to enable it."
+  run_help_for_usage: "run 'herdr --help' for usage"
+  remote_only_default: "--remote can only be used with the default launch command"
 
 # TUI 通用词汇
 common:

@@ -466,8 +466,8 @@ fn random_nested_message() -> &'static str {
 
 fn exit_if_nested_disabled(config: &config::Config) {
     if should_block_nested(config) {
-        eprintln!("\x1b[1merror:\x1b[0m nested herdr is disabled by default.");
-        eprintln!("see configuration if you want to enable it.");
+        eprintln!("\x1b[1merror:\x1b[0m {}", t!("cli.nested_disabled"));
+        eprintln!("{}", t!("cli.nested_hint"));
         eprintln!();
         eprintln!("\x1b[2m\"{}\"\x1b[0m", random_nested_message());
         std::process::exit(1);
@@ -492,7 +492,7 @@ fn main() -> io::Result<()> {
         Ok(args) => args,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("{}", t!("cli.run_help_for_usage"));
             std::process::exit(2);
         }
     };
@@ -500,7 +500,7 @@ fn main() -> io::Result<()> {
         Ok(args) => args,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("{}", t!("cli.run_help_for_usage"));
             std::process::exit(2);
         }
     };
@@ -508,7 +508,7 @@ fn main() -> io::Result<()> {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("{}", t!("cli.run_help_for_usage"));
             std::process::exit(2);
         }
     };
@@ -522,8 +522,8 @@ fn main() -> io::Result<()> {
             )
         })
     {
-        eprintln!("error: --remote can only be used with the default launch command");
-        eprintln!("run 'herdr --help' for usage");
+        eprintln!("error: {}", t!("cli.remote_only_default"));
+        eprintln!("{}", t!("cli.run_help_for_usage"));
         std::process::exit(2);
     }
 
@@ -732,7 +732,7 @@ fn main() -> io::Result<()> {
         let arg_name = arg.split_once('=').map(|(name, _)| name).unwrap_or(arg);
         if arg.starts_with('-') && !known_flags.contains(&arg_name) {
             eprintln!("unknown option: {arg}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("{}", t!("cli.run_help_for_usage"));
             std::process::exit(2);
         }
         if !arg.starts_with('-')
@@ -753,7 +753,7 @@ fn main() -> io::Result<()> {
             .contains(&arg.as_str())
         {
             eprintln!("unknown command: {arg}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("{}", t!("cli.run_help_for_usage"));
             std::process::exit(2);
         }
     }

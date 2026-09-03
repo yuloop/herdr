@@ -620,16 +620,10 @@ fn main() -> io::Result<()> {
         println!("{}:", t!("cli.root_common_commands"));
         for (command, description) in [
             ("herdr", t!("cli.root_launch_about")),
-            (
-                "herdr status [server|client]",
-                t!("cli.status_about"),
-            ),
+            ("herdr status [server|client]", t!("cli.status_about")),
             ("herdr update", t!("cli.update_about")),
             ("herdr completion zsh", t!("cli.completion_about")),
-            (
-                "herdr server stop",
-                t!("cli.server_stop_about"),
-            ),
+            ("herdr server stop", t!("cli.server_stop_about")),
             (
                 "herdr channel set <stable|preview>",
                 t!("cli.channel_set_about"),
@@ -638,43 +632,19 @@ fn main() -> io::Result<()> {
                 "herdr server reload-config",
                 t!("cli.server_reload_config_about"),
             ),
-            (
-                "herdr config reset-keys",
-                t!("cli.config_reset_keys_about"),
-            ),
-            (
-                "herdr channel <subcommand>",
-                t!("cli.channel_about"),
-            ),
-            (
-                "herdr api <subcommand>",
-                t!("cli.api_about"),
-            ),
-            (
-                "herdr workspace <subcommand>",
-                t!("cli.workspace_about"),
-            ),
-            (
-                "herdr worktree <subcommand>",
-                t!("cli.worktree_about"),
-            ),
+            ("herdr config reset-keys", t!("cli.config_reset_keys_about")),
+            ("herdr channel <subcommand>", t!("cli.channel_about")),
+            ("herdr api <subcommand>", t!("cli.api_about")),
+            ("herdr workspace <subcommand>", t!("cli.workspace_about")),
+            ("herdr worktree <subcommand>", t!("cli.worktree_about")),
             ("herdr tab <subcommand>", t!("cli.tab_about")),
             (
                 "herdr notification <subcommand>",
                 t!("cli.notification_about"),
             ),
-            (
-                "herdr agent <subcommand>",
-                t!("cli.agent_about"),
-            ),
-            (
-                "herdr pane <subcommand>",
-                t!("cli.pane_about"),
-            ),
-            (
-                "herdr session <subcommand>",
-                t!("cli.session_about"),
-            ),
+            ("herdr agent <subcommand>", t!("cli.agent_about")),
+            ("herdr pane <subcommand>", t!("cli.pane_about")),
+            ("herdr session <subcommand>", t!("cli.session_about")),
             (
                 "herdr integration <subcommand>",
                 t!("cli.integration_about"),
@@ -691,7 +661,10 @@ fn main() -> io::Result<()> {
         println!("  --session <name>    {}", t!("cli.session_help"));
         println!("  --remote <target>   {}", t!("cli.remote_help"));
         println!("  --remote-keybindings <local|server>");
-        println!("                      {}", t!("cli.remote_keybindings_help"));
+        println!(
+            "                      {}",
+            t!("cli.remote_keybindings_help")
+        );
         println!("  --handoff           {}", t!("cli.handoff_help"));
         println!("  --default-config    {}", t!("cli.default_config_help"));
         println!("  --skill             {}", t!("cli.skill_help"));

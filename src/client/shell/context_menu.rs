@@ -92,14 +92,8 @@ impl ClientContextMenuOverlay {
                     ));
                 }
                 items.extend([
-                    item(
-                        t!("state.ctx_split_right").to_string(),
-                        Action::SplitRight,
-                    ),
-                    item(
-                        t!("state.ctx_split_down").to_string(),
-                        Action::SplitDown,
-                    ),
+                    item(t!("state.ctx_split_right").to_string(), Action::SplitRight),
+                    item(t!("state.ctx_split_down").to_string(), Action::SplitDown),
                     item(t!("state.ctx_zoom").to_string(), Action::Zoom),
                     item(
                         if *right_click_passthrough {
@@ -109,10 +103,7 @@ impl ClientContextMenuOverlay {
                         },
                         Action::ToggleRightClickPassthrough,
                     ),
-                    item(
-                        t!("state.ctx_close_pane").to_string(),
-                        Action::ClosePane,
-                    ),
+                    item(t!("state.ctx_close_pane").to_string(), Action::ClosePane),
                 ]);
                 items
             }

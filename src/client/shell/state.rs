@@ -423,17 +423,7 @@ impl ClientSettingsSection {
         Self::Integrations,
     ];
 
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Self::Theme => "theme",
-            Self::Indicators => "indicators",
-            Self::Sound => "sound",
-            Self::Toast => "toasts",
-            Self::Integrations => "integrations",
-        }
-    }
-
-    pub(super) fn display_label(self) -> String {
+    pub(super) fn label(self) -> String {
         match self {
             Self::Theme => rust_i18n::t!("state.theme").to_string(),
             Self::Indicators => rust_i18n::t!("state.indicators").to_string(),
@@ -441,6 +431,10 @@ impl ClientSettingsSection {
             Self::Toast => rust_i18n::t!("state.toasts").to_string(),
             Self::Integrations => rust_i18n::t!("state.integrations").to_string(),
         }
+    }
+
+    pub(super) fn display_label(self) -> String {
+        self.label()
     }
 }
 
@@ -490,15 +484,28 @@ impl ClientWorktreeOpenEntry {
         }
     }
 
+    pub(super) fn display_status_label(&self) -> String {
+        if self.open_workspace_id.is_some() {
+            rust_i18n::t!("state.wt_open").to_string()
+        } else if self.branch.is_some() {
+            String::new()
+        } else if self.is_detached && self.is_linked_worktree {
+            rust_i18n::t!("state.wt_detached").to_string()
+        } else {
+            rust_i18n::t!("state.wt_root").to_string()
+        }
+    }
+
     pub(super) fn matches_query(&self, query: &str) -> bool {
         let query = query.trim().to_lowercase();
         query.is_empty()
             || format!(
-                "{} {} {} {}",
+                "{} {} {} {} {}",
                 self.label,
                 self.branch.as_deref().unwrap_or_default(),
                 self.path,
-                self.status_label()
+                self.status_label(),
+                self.display_status_label()
             )
             .to_lowercase()
             .contains(&query)

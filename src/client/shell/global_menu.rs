@@ -21,33 +21,33 @@ pub(super) fn global_menu_item_has_badge(
 
 pub(super) fn global_menu_items(
     snapshot: &ClientShellSnapshot,
-) -> Vec<(&'static str, ClientGlobalMenuAction)> {
+) -> Vec<(String, ClientGlobalMenuAction)> {
     let mut items = vec![
         (
-            "settings",
+            rust_i18n::t!("state.settings").to_string(),
             ClientGlobalMenuAction::Binding(crate::input::KeybindAction::Settings),
         ),
         (
-            "keybinds",
+            rust_i18n::t!("state.keybinds").to_string(),
             ClientGlobalMenuAction::Binding(crate::input::KeybindAction::Help),
         ),
         (
-            "reload config",
+            rust_i18n::t!("state.reload_config").to_string(),
             ClientGlobalMenuAction::Binding(crate::input::KeybindAction::ReloadConfig),
         ),
     ];
     if snapshot.update_available.is_some() || snapshot.latest_release_notes_available {
         items.push((
             if snapshot.update_available.is_some() {
-                "update ready"
+                rust_i18n::t!("state.update_ready").to_string()
             } else {
-                "what's new"
+                rust_i18n::t!("state.what_s_new").to_string()
             },
             ClientGlobalMenuAction::WhatsNew,
         ));
     }
     items.push((
-        "detach",
+        rust_i18n::t!("state.detach").to_string(),
         ClientGlobalMenuAction::Binding(crate::input::KeybindAction::Detach),
     ));
     items

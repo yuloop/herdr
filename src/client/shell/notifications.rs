@@ -74,14 +74,16 @@ pub(super) fn render_mobile_notification_banner(
         SemanticNotificationKind::NeedsAttention => event
             .title
             .strip_suffix(" needs attention")
-            .map(|agent| format!("{agent} waiting"))
+            .map(|agent| rust_i18n::t!("mobile.waiting", agent = agent).to_string())
             .unwrap_or_else(|| event.title.clone()),
         SemanticNotificationKind::Finished => event
             .title
             .strip_suffix(" finished")
-            .map(|agent| format!("{agent} done"))
+            .map(|agent| rust_i18n::t!("mobile.done", agent = agent).to_string())
             .unwrap_or_else(|| event.title.clone()),
-        SemanticNotificationKind::UpdateInstalled => "update ready".to_owned(),
+        SemanticNotificationKind::UpdateInstalled => {
+            rust_i18n::t!("release.update_ready").to_string()
+        }
         SemanticNotificationKind::Custom => event.title.clone(),
     };
     let dot_color = match event.kind {

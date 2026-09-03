@@ -334,10 +334,10 @@ fn render_release_notes_overlay(
         subtitle_area.x,
         subtitle_area.y,
         subtitle_area.width,
-        if notes.preview {
-            "update ready"
+        &if notes.preview {
+            rust_i18n::t!("release.update_ready").to_string()
         } else {
-            "what's new in this release"
+            rust_i18n::t!("release.whats_new").to_string()
         },
         base.fg(p.overlay1),
     );
@@ -991,7 +991,7 @@ fn render_help_overlay(
         i.x,
         i.y,
         i.width,
-        "keybinds",
+        &rust_i18n::t!("keybind.title").to_string(),
         Style::default()
             .fg(p.text)
             .bg(p.panel_bg)

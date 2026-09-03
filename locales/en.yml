@@ -464,6 +464,7 @@ mobile:
   idle_count: "%{count} idle"
   waiting: "%{agent} waiting"
   done: "%{agent} done"
+  no_matching_agents: "no matching agents"
 
 # state label/context menu (app/state.rs)
 state:

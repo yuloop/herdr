@@ -464,6 +464,7 @@ mobile:
   idle_count: "%{count} 空闲"
   waiting: "%{agent} 等待中"
   done: "%{agent} 已完成"
+  no_matching_agents: "没有匹配的智能体"
 
 # state label/context menu (app/state.rs)
 state:

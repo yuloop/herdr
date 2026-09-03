@@ -32,10 +32,10 @@ impl MobileItem {
         }
     }
 
-    fn action(label: &'static str, target: ClientMobileTarget, palette: &Palette) -> Self {
+    fn action(label: impl Into<String>, target: ClientMobileTarget, palette: &Palette) -> Self {
         Self {
             lines: vec![Line::from(Span::styled(
-                label,
+                label.into(),
                 Style::default()
                     .fg(palette.accent)
                     .bg(palette.panel_bg)
@@ -94,7 +94,7 @@ fn render_header_status(
             area.x,
             area.y,
             area.width,
-            " no workspace",
+            &rust_i18n::t!("mobile.no_workspace").to_string(),
             Style::default().fg(palette.text).bg(palette.panel_bg),
         );
         return;
@@ -168,8 +168,8 @@ fn render_header_button(
         );
     }
     let label_y = if area.height > 1 { area.y + 1 } else { area.y };
-    let label = "switch";
-    let label_width = display_width(label);
+    let label = rust_i18n::t!("mobile.switch_btn").to_string();
+    let label_width = display_width(&label);
     put_text(
         buffer,
         area.x
@@ -177,7 +177,7 @@ fn render_header_button(
             .saturating_add(area.width.saturating_sub(1 + label_width) / 2),
         label_y,
         area.width.saturating_sub(1),
-        label,
+        &label,
         Style::default()
             .fg(palette.text)
             .bg(palette.surface0)
@@ -217,9 +217,15 @@ fn compact_tab_status(snapshot: &ClientShellSnapshot, workspace: &ClientShellWor
         .map(|tab| tab.label.as_str())
         .unwrap_or("1");
     if tabs.len() <= 1 {
-        format!("tab {label}")
+        rust_i18n::t!("mobile.tab_status", name = label).to_string()
     } else {
-        format!("tab {label} · {}/{}", active + 1, tabs.len())
+        rust_i18n::t!(
+            "mobile.tab_status_pos",
+            name = label,
+            cur = active + 1,
+            total = tabs.len()
+        )
+        .to_string()
     }
 }
 
@@ -231,10 +237,16 @@ fn render_agent_summary(
 ) {
     use crate::api::schema::AgentStatus;
     let counts = [
-        (AgentStatus::Blocked, "blocked"),
-        (AgentStatus::Done, "done"),
-        (AgentStatus::Working, "working"),
-        (AgentStatus::Idle, "idle"),
+        (
+            AgentStatus::Blocked,
+            rust_i18n::t!("status.blocked").to_string(),
+        ),
+        (AgentStatus::Done, rust_i18n::t!("status.done").to_string()),
+        (
+            AgentStatus::Working,
+            rust_i18n::t!("status.working").to_string(),
+        ),
+        (AgentStatus::Idle, rust_i18n::t!("status.idle").to_string()),
     ]
     .map(|(status, label)| {
         (
@@ -255,7 +267,7 @@ fn render_agent_summary(
             area.x,
             area.y,
             area.width,
-            " no agents",
+            &rust_i18n::t!("mobile.no_agents").to_string(),
             Style::default()
                 .fg(config.palette.overlay1)
                 .bg(config.palette.panel_bg),
@@ -268,7 +280,7 @@ fn render_agent_summary(
             area.x,
             area.y,
             area.width,
-            " all idle",
+            &rust_i18n::t!("mobile.all_idle").to_string(),
             Style::default()
                 .fg(config.palette.overlay1)
                 .bg(config.palette.panel_bg),
@@ -395,7 +407,7 @@ pub(super) fn render_mobile_switcher(
         area.x,
         area.y,
         close.x.saturating_sub(area.x),
-        " switch",
+        &rust_i18n::t!("mobile.switch").to_string(),
         Style::default()
             .fg(palette.text)
             .bg(palette.panel_bg)
@@ -535,7 +547,7 @@ fn render_close_button(buffer: &mut Buffer, area: Rect, palette: &Palette) {
         label_x,
         area.y,
         area.width.saturating_sub(1),
-        "close",
+        &rust_i18n::t!("mobile.close_btn").to_string(),
         Style::default()
             .fg(palette.overlay1)
             .bg(palette.surface0)
@@ -570,13 +582,13 @@ fn mobile_items(
         let title = snapshot
             .agent_view_label
             .as_deref()
-            .map(|label| format!("agents · {label}"))
-            .unwrap_or_else(|| "agents".to_owned());
+            .map(|label| format!("{} · {label}", rust_i18n::t!("mobile.agents")))
+            .unwrap_or_else(|| rust_i18n::t!("mobile.agents").to_string());
         items.push(MobileItem::section(title, palette));
         if ordered_agents.is_empty() {
             items.push(MobileItem {
                 lines: vec![Line::from(Span::styled(
-                    "  no matching agents",
+                    format!("  {}", rust_i18n::t!("mobile.no_matching_agents")),
                     Style::default()
                         .fg(palette.overlay0)
                         .bg(palette.panel_bg)
@@ -626,7 +638,7 @@ fn mobile_items(
                     .map(|(_, label)| label.clone())
                     .unwrap_or_else(|| {
                         if agent.agent_status == crate::api::schema::AgentStatus::Unknown {
-                            "idle".to_owned()
+                            rust_i18n::t!("status.idle").to_string()
                         } else {
                             status_key.to_owned()
                         }
@@ -674,9 +686,12 @@ fn mobile_items(
         }
     }
 
-    items.push(MobileItem::section("spaces", palette));
+    items.push(MobileItem::section(
+        rust_i18n::t!("mobile.spaces").to_string(),
+        palette,
+    ));
     items.push(MobileItem::action(
-        "  + new workspace",
+        format!("  {}", rust_i18n::t!("mobile.new_workspace")),
         ClientMobileTarget::NewWorkspace,
         palette,
     ));
@@ -710,7 +725,11 @@ fn mobile_items(
         } else {
             &workspace.label
         };
-        let branch = workspace.branch.as_deref().unwrap_or("shell");
+        let branch: String = workspace
+            .branch
+            .as_deref()
+            .map(str::to_owned)
+            .unwrap_or_else(|| rust_i18n::t!("nav.shell").to_string());
         let detail_prefix = if entry.indented {
             if entry.last_child {
                 "       "
@@ -768,9 +787,12 @@ fn mobile_items(
     }
 
     if let Some(workspace_id) = snapshot.focused_workspace_id.as_deref() {
-        items.push(MobileItem::section("tabs", palette));
+        items.push(MobileItem::section(
+            rust_i18n::t!("mobile.tabs").to_string(),
+            palette,
+        ));
         items.push(MobileItem::action(
-            "  + new tab",
+            format!("  {}", rust_i18n::t!("mobile.new_tab")),
             ClientMobileTarget::NewTab,
             palette,
         ));
@@ -788,7 +810,7 @@ fn mobile_items(
             let label = if tab.custom_label {
                 format!("{} · {}", index + 1, tab.label)
             } else {
-                format!("tab {}", tab.label)
+                rust_i18n::t!("mobile.tab_status", name = tab.label.as_str()).to_string()
             };
             let label = format!(
                 "  {}",
@@ -808,7 +830,10 @@ fn mobile_items(
         }
     }
 
-    items.push(MobileItem::section("menu", palette));
+    items.push(MobileItem::section(
+        rust_i18n::t!("common.menu").to_string(),
+        palette,
+    ));
     for (index, (label, _)) in super::global_menu::global_menu_items(snapshot)
         .into_iter()
         .enumerate()

@@ -1,50 +1,73 @@
 use super::*;
+use rust_i18n::t;
 
 impl ClientContextMenuOverlay {
     pub(super) fn items(&self) -> Vec<ClientContextMenuItem> {
         use ClientContextMenuAction as Action;
 
-        let item = |label, action| ClientContextMenuItem { label, action };
+        let item = |label: String, action| ClientContextMenuItem { label, action };
         match &self.target {
             ClientContextMenuTarget::Workspace { is_git: false, .. } => {
-                vec![item("Rename", Action::Rename), item("Close", Action::Close)]
+                vec![
+                    item(t!("state.ctx_rename").to_string(), Action::Rename),
+                    item(t!("state.ctx_close").to_string(), Action::Close),
+                ]
             }
             ClientContextMenuTarget::Workspace {
                 is_linked_worktree: false,
                 has_worktree_children: false,
                 ..
             } => vec![
-                item("Rename", Action::Rename),
-                item("Close", Action::Close),
-                item("New worktree", Action::NewWorktree),
-                item("Open worktree...", Action::OpenWorktree),
+                item(t!("state.ctx_rename").to_string(), Action::Rename),
+                item(t!("state.ctx_close").to_string(), Action::Close),
+                item(
+                    t!("state.ctx_new_worktree").to_string(),
+                    Action::NewWorktree,
+                ),
+                item(
+                    t!("state.ctx_open_worktree").to_string(),
+                    Action::OpenWorktree,
+                ),
             ],
             ClientContextMenuTarget::Workspace {
                 is_linked_worktree: true,
                 ..
             } => vec![
-                item("Rename", Action::Rename),
-                item("Close", Action::Close),
-                item("Delete worktree checkout...", Action::RemoveWorktree),
+                item(t!("state.ctx_rename").to_string(), Action::Rename),
+                item(t!("state.ctx_close").to_string(), Action::Close),
+                item(
+                    t!("state.ctx_delete_worktree").to_string(),
+                    Action::RemoveWorktree,
+                ),
             ],
             ClientContextMenuTarget::Workspace {
                 has_worktree_children: true,
                 collapsed,
                 ..
             } => vec![
-                item("Rename", Action::Rename),
-                item("Close group", Action::Close),
-                item("New worktree", Action::NewWorktree),
-                item("Open worktree...", Action::OpenWorktree),
+                item(t!("state.ctx_rename").to_string(), Action::Rename),
+                item(t!("state.ctx_close_group").to_string(), Action::Close),
                 item(
-                    if *collapsed { "Expand" } else { "Collapse" },
+                    t!("state.ctx_new_worktree").to_string(),
+                    Action::NewWorktree,
+                ),
+                item(
+                    t!("state.ctx_open_worktree").to_string(),
+                    Action::OpenWorktree,
+                ),
+                item(
+                    if *collapsed {
+                        t!("state.ctx_expand").to_string()
+                    } else {
+                        t!("state.ctx_collapse").to_string()
+                    },
                     Action::ToggleGroup,
                 ),
             ],
             ClientContextMenuTarget::Tab { .. } => vec![
-                item("New tab", Action::NewTab),
-                item("Rename", Action::Rename),
-                item("Close", Action::Close),
+                item(t!("state.ctx_new_tab").to_string(), Action::NewTab),
+                item(t!("state.ctx_rename").to_string(), Action::Rename),
+                item(t!("state.ctx_close").to_string(), Action::Close),
             ],
             ClientContextMenuTarget::Pane {
                 source_pane_id,
@@ -52,26 +75,44 @@ impl ClientContextMenuOverlay {
                 right_click_passthrough,
                 ..
             } => {
-                let mut items = vec![item("Rename pane", Action::RenamePane)];
+                let mut items = vec![item(
+                    t!("state.ctx_rename_pane").to_string(),
+                    Action::RenamePane,
+                )];
                 if *has_manual_label {
-                    items.push(item("Clear pane name", Action::ClearPaneName));
+                    items.push(item(
+                        t!("state.ctx_clear_pane_name").to_string(),
+                        Action::ClearPaneName,
+                    ));
                 }
                 if source_pane_id.is_some() {
-                    items.push(item("Swap with focused pane", Action::SwapWithFocusedPane));
+                    items.push(item(
+                        t!("state.ctx_swap_focused").to_string(),
+                        Action::SwapWithFocusedPane,
+                    ));
                 }
                 items.extend([
-                    item("Split right", Action::SplitRight),
-                    item("Split down", Action::SplitDown),
-                    item("Zoom", Action::Zoom),
+                    item(
+                        t!("state.ctx_split_right").to_string(),
+                        Action::SplitRight,
+                    ),
+                    item(
+                        t!("state.ctx_split_down").to_string(),
+                        Action::SplitDown,
+                    ),
+                    item(t!("state.ctx_zoom").to_string(), Action::Zoom),
                     item(
                         if *right_click_passthrough {
-                            "Use Herdr right-click menu"
+                            "Use Herdr right-click menu".to_string()
                         } else {
-                            "Send right-clicks to pane"
+                            "Send right-clicks to pane".to_string()
                         },
                         Action::ToggleRightClickPassthrough,
                     ),
-                    item("Close pane", Action::ClosePane),
+                    item(
+                        t!("state.ctx_close_pane").to_string(),
+                        Action::ClosePane,
+                    ),
                 ]);
                 items
             }

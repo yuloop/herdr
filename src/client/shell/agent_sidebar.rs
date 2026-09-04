@@ -84,12 +84,17 @@ pub(super) fn render_agent_panel(
                 }
             });
     let sort_width = display_width(&sort_label).min(area.width as usize) as u16;
+    let left_width = area.width.saturating_sub(sort_width);
+    let left_text = crate::ui::truncate_end(
+        &rust_i18n::t!("sidebar.agents").to_string(),
+        left_width as usize,
+    );
     put_text(
         buffer,
         area.x,
         area.y + 1,
-        area.width.saturating_sub(sort_width),
-        &rust_i18n::t!("sidebar.agents").to_string(),
+        left_width,
+        &left_text,
         Style::default()
             .fg(config.palette.overlay0)
             .add_modifier(Modifier::BOLD),
@@ -110,7 +115,7 @@ pub(super) fn render_agent_panel(
         sort_rect.x,
         sort_rect.y,
         sort_rect.width,
-        &sort_label,
+        &crate::ui::truncate_end(&sort_label, sort_width as usize),
         Style::default()
             .fg(if snapshot.agent_view_label.is_some() {
                 config.palette.accent

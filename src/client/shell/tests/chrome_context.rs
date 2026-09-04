@@ -663,3 +663,147 @@ fn global_menu_shows_restore_right_click_only_for_passthrough_pane() {
     ));
     assert!(state.overlay.is_none());
 }
+
+#[test]
+fn settings_apply_button_saves_theme_and_closes() {
+    let dir = std::env::temp_dir().join(format!(
+        "herdr-settings-apply-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let path = dir.join("config.toml");
+    std::fs::create_dir_all(&dir).expect("create temp config dir");
+    std::fs::write(&path, "[ui]\nlanguage = \"en\"\n").expect("write temp config");
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.local_config_path = path.clone();
+    let mut state = ClientShellState::new(config);
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_settings_overlay();
+    state.move_settings_selection(1);
+    let expected = crate::config::THEME_NAMES
+        .get(match state.overlay.as_ref() {
+            Some(ClientShellOverlay::Settings(settings)) => settings.selected,
+            other => panic!("settings overlay, got {other:?}"),
+        })
+        .expect("theme choice")
+        .to_string();
+    state.compose(106, 30).expect("settings frame");
+    let primary = state.hits.overlay_primary;
+    assert!(primary.width > 0, "apply button must have a hitbox");
+    let outcome =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: primary.x,
+            row: primary.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    assert!(
+        state.overlay.is_none(),
+        "apply must close the settings overlay on success"
+    );
+    let content = std::fs::read_to_string(&path).expect("read temp config");
+    assert!(
+        content.contains(&format!("name = \"{expected}\"")),
+        "apply must persist the selected theme, got: {content}"
+    );
+    assert!(
+        outcome.actions.iter().any(|action| matches!(
+            action,
+            ClientShellAction::Endpoint { request, .. }
+                if matches!(
+                    request.method,
+                    crate::api::schema::Method::ServerReloadConfig(_)
+                )
+        )),
+        "apply must request a server config reload"
+    );
+    std::fs::remove_dir_all(&dir).expect("remove temp config dir");
+}
+
+#[test]
+fn settings_apply_button_closes_sound_section_on_success() {
+    let dir = std::env::temp_dir().join(format!(
+        "herdr-settings-apply-sound-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let path = dir.join("config.toml");
+    std::fs::create_dir_all(&dir).expect("create temp config dir");
+    std::fs::write(&path, "[ui]\nlanguage = \"en\"\n").expect("write temp config");
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.local_config_path = path.clone();
+    let mut state = ClientShellState::new(config);
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_settings_overlay();
+    let mut select = ClientShellInput::default();
+    state.select_settings_section(ClientSettingsSection::Sound, &mut select);
+    state.compose(106, 30).expect("settings frame");
+    let primary = state.hits.overlay_primary;
+    assert!(primary.width > 0, "apply button must have a hitbox");
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: primary.x,
+        row: primary.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(
+        state.overlay.is_none(),
+        "apply must close the settings overlay on success"
+    );
+    let content = std::fs::read_to_string(&path).expect("read temp config");
+    assert!(
+        content.contains("[ui.sound]"),
+        "apply must persist the sound setting, got: {content}"
+    );
+    std::fs::remove_dir_all(&dir).expect("remove temp config dir");
+}
+
+#[test]
+fn agent_panel_header_truncates_gracefully_in_narrow_sidebar() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let snapshot = state.snapshot.as_deref().expect("snapshot").clone();
+    let row_text = |width: u16| {
+        let area = Rect::new(0, 0, width, 6);
+        let mut buffer = Buffer::empty(area);
+        let mut hits = ShellHitMap::default();
+        let mut scroll = 0usize;
+        super::super::agent_sidebar::render_agent_panel(
+            &mut buffer,
+            area,
+            &snapshot,
+            &state.config,
+            &mut scroll,
+            &mut hits,
+        );
+        (0..width)
+            .map(|x| buffer[(x, 1)].symbol().to_string())
+            .collect::<String>()
+    };
+    let wide = row_text(40);
+    assert!(
+        wide.contains("agents"),
+        "wide header must show the full title, got {wide:?}"
+    );
+    assert!(
+        wide.contains("grouped"),
+        "wide header must show the full sort label, got {wide:?}"
+    );
+    let narrow = row_text(12);
+    assert!(
+        narrow.contains("grouped"),
+        "narrow header must keep the sort label visible, got {narrow:?}"
+    );
+    assert!(
+        narrow.contains('…'),
+        "narrow header must ellipsize the title instead of overlapping, got {narrow:?}"
+    );
+}

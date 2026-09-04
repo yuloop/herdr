@@ -575,6 +575,7 @@ state:
   settings: "设置"
   keybinds: "快捷键"
   update_ready: "有可用更新"
+  restore_right_click: "恢复右键菜单"
   # worktree open statuses
   wt_open: "已打开"
   wt_detached: "脱离"

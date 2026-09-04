@@ -575,6 +575,7 @@ state:
   settings: "settings"
   keybinds: "keybinds"
   update_ready: "update ready"
+  restore_right_click: "Restore right-click menu"
   # worktree open statuses
   wt_open: "open"
   wt_detached: "detached"

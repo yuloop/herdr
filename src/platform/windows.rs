@@ -105,8 +105,8 @@ use windows_sys::{
             Input::{
                 Ime::ImmGetDefaultIMEWnd,
                 KeyboardAndMouse::{
-                    GetKeyboardLayout, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
-                    KEYEVENTF_KEYUP,
+                    GetKeyboardLayout, SendInput, ToUnicodeEx, INPUT, INPUT_0, INPUT_KEYBOARD,
+                    KEYBDINPUT, KEYEVENTF_KEYUP,
                 },
             },
             Shell::{
@@ -132,6 +132,36 @@ const PANE_RUNTIME_MARKER_ENV_VAR: &str = "HERDR_PANE_RUNTIME_ID";
 
 pub(crate) fn terminal_title_for_presentation(title: &str) -> &str {
     title.strip_prefix("Administrator: ").unwrap_or(title)
+}
+
+pub(crate) fn prepare_paste_text_for_pty_platform(text: String) -> String {
+    text.replace("\r\n", "\n").replace('\n', "\r\n")
+}
+
+/// Resolves against the current foreground layout because asynchronous console
+/// records do not retain the layout that was active when the key was pressed.
+pub(crate) fn resolve_base_printable_key(vk: u16, scan: u16) -> Option<char> {
+    // SAFETY: Win32 owns the handles; the fixed buffers match the API lengths.
+    unsafe {
+        let thread_id = GetWindowThreadProcessId(GetForegroundWindow(), null_mut());
+        let layout = GetKeyboardLayout(thread_id);
+
+        let key_state = [0u8; 256];
+        let mut output = [0u16; 2];
+        let written = ToUnicodeEx(
+            vk.into(),
+            scan.into(),
+            key_state.as_ptr(),
+            output.as_mut_ptr(),
+            output.len() as i32,
+            0x4,
+            layout,
+        );
+        let units = output.get(..usize::try_from(written).ok()?)?;
+        let mut chars = char::decode_utf16(units.iter().copied());
+        let ch = chars.next()?.ok()?;
+        (chars.next().is_none() && !ch.is_control()).then_some(ch)
+    }
 }
 
 const MAX_PROCESS_ENVIRONMENT_BYTES: usize = 256 * 1024;
@@ -2571,6 +2601,14 @@ mod tests {
     use windows_sys::Win32::System::Console::{
         AllocConsole, FreeConsole, GetConsoleProcessList, GetConsoleWindow,
     };
+
+    #[test]
+    fn paste_text_uses_windows_line_endings() {
+        assert_eq!(
+            super::prepare_paste_text_for_pty_platform("one\ntwo\r\nthree\rfour".to_owned()),
+            "one\r\ntwo\r\nthree\rfour"
+        );
+    }
 
     #[test]
     fn private_remote_directory_supports_long_paths() {

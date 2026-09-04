@@ -164,7 +164,11 @@ impl ClientShellState {
         edit: crate::config::ConfigEdit<'_>,
         outcome: &mut ClientShellInput,
     ) -> bool {
-        if let Err(error) = crate::config::write_edit(edit) {
+        if let Err(error) = crate::config::update_file_at(
+            &self.config.local_config_path,
+            edit.description(),
+            |content| edit.apply(content),
+        ) {
             self.endpoint_error = Some(error);
             outcome.repaint = true;
             return false;
@@ -202,13 +206,17 @@ impl ClientShellState {
                 } else {
                     crate::config::StatusIndicatorStyle::Symbols
                 };
-                self.save_settings_edit(
-                    crate::config::ConfigEdit::StatusIndicators(style),
-                    outcome,
-                );
+                if self
+                    .save_settings_edit(crate::config::ConfigEdit::StatusIndicators(style), outcome)
+                {
+                    self.overlay = None;
+                }
             }
             ClientSettingsSection::Sound => {
-                self.save_settings_edit(crate::config::ConfigEdit::Sound(selected == 0), outcome);
+                if self.save_settings_edit(crate::config::ConfigEdit::Sound(selected == 0), outcome)
+                {
+                    self.overlay = None;
+                }
             }
             ClientSettingsSection::Toast => {
                 let delivery = match selected {
@@ -217,10 +225,11 @@ impl ClientShellState {
                     2 => crate::config::ToastDelivery::Terminal,
                     _ => crate::config::ToastDelivery::System,
                 };
-                self.save_settings_edit(
-                    crate::config::ConfigEdit::ToastDelivery(delivery),
-                    outcome,
-                );
+                if self
+                    .save_settings_edit(crate::config::ConfigEdit::ToastDelivery(delivery), outcome)
+                {
+                    self.overlay = None;
+                }
             }
             ClientSettingsSection::Integrations => self.install_recommended_integrations(outcome),
         }

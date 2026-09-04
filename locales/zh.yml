@@ -317,6 +317,8 @@ nav:
   tab_label: "标签页: %{name}"
   pane_label: "窗格 %{number}"
   shell: "shell"
+  search_footer: " 输入搜索 · 移动 ↑↓/ctrl+n/p · 打开 enter · 返回 esc"
+  browse_footer: " 移动 j/k · 展开 space · 筛选 a/b/w/i/d · 搜索 / · 打开 enter · 关闭 esc"
 
 # dialog 对话框 (dialogs.rs)
 dialog:
@@ -461,6 +463,9 @@ keybind:
   resize_pane_down: "向下调整窗格"
   resize_pane_up: "向上调整窗格"
   resize_pane_right: "向右调整窗格"
+  no_match: " 没有匹配的快捷键"
+  filter_footer: " 筛选 输入/退格 · 清除 ctrl+u · 滚动 ↑↓/pgup/pgdn · 返回 esc"
+  browse_footer: " 搜索 / · 滚动 j/k/↑↓/pgup/pgdn · 关闭 esc/enter"
 
 # release 发布说明 (release_notes.rs)
 release:
@@ -562,3 +567,12 @@ state:
   wt_open: "已打开"
   wt_detached: "脱离"
   wt_root: "根目录"
+
+# overlay 底部按钮与页脚 (shell/overlays.rs)
+overlay:
+  esc_close: " esc 关闭 "
+  esc_back: " esc 返回 "
+  esc_cancel: " esc 取消 "
+  confirm_btn: " ↵ 确认 "
+  wheel: "滚轮 ↑↓"
+  esc_enter: " esc / enter "

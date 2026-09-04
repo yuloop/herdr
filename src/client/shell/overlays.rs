@@ -350,7 +350,7 @@ fn render_release_notes_overlay(
     button(
         b,
         close,
-        " esc close ",
+        &rust_i18n::t!("overlay.esc_close").to_string(),
         Style::default()
             .fg(contrast(p))
             .bg(p.accent)
@@ -379,11 +379,11 @@ fn render_release_notes_overlay(
 
     if let Some(footer_area) = stack.footer {
         let footer_line = ratatui::text::Line::from(vec![
-            ratatui::text::Span::styled(" scroll ", base.fg(p.overlay0)),
-            ratatui::text::Span::styled("wheel ↑↓", base.fg(p.text)),
+            ratatui::text::Span::styled(rust_i18n::t!("common.scroll").to_string(), base.fg(p.overlay0)),
+            ratatui::text::Span::styled(rust_i18n::t!("overlay.wheel").to_string(), base.fg(p.text)),
             ratatui::text::Span::styled("  ·  ", base.fg(p.overlay0)),
-            ratatui::text::Span::styled("close", base.fg(p.overlay0)),
-            ratatui::text::Span::styled(" esc / enter ", base.fg(p.text)),
+            ratatui::text::Span::styled(rust_i18n::t!("common.close").to_string(), base.fg(p.overlay0)),
+            ratatui::text::Span::styled(rust_i18n::t!("overlay.esc_enter").to_string(), base.fg(p.text)),
         ]);
         ratatui::widgets::Widget::render(
             ratatui::widgets::Paragraph::new(footer_line),
@@ -441,9 +441,9 @@ fn render_product_announcement_overlay(
         base.fg(p.text).add_modifier(Modifier::BOLD),
     );
     let subtitle = if announcement.preview {
-        "product announcement preview"
+        rust_i18n::t!("release.announcement_preview").to_string()
     } else {
-        "product announcement"
+        rust_i18n::t!("release.announcement").to_string()
     };
     put_text(
         b,
@@ -462,7 +462,7 @@ fn render_product_announcement_overlay(
     button(
         b,
         close,
-        " esc close ",
+        &rust_i18n::t!("overlay.esc_close").to_string(),
         Style::default()
             .fg(contrast(p))
             .bg(p.accent)
@@ -491,11 +491,11 @@ fn render_product_announcement_overlay(
 
     if let Some(footer_area) = stack.footer {
         let footer_line = ratatui::text::Line::from(vec![
-            ratatui::text::Span::styled(" scroll ", base.fg(p.overlay0)),
-            ratatui::text::Span::styled("wheel ↑↓", base.fg(p.text)),
+            ratatui::text::Span::styled(rust_i18n::t!("common.scroll").to_string(), base.fg(p.overlay0)),
+            ratatui::text::Span::styled(rust_i18n::t!("overlay.wheel").to_string(), base.fg(p.text)),
             ratatui::text::Span::styled("  ·  ", base.fg(p.overlay0)),
-            ratatui::text::Span::styled("close", base.fg(p.overlay0)),
-            ratatui::text::Span::styled(" esc / enter ", base.fg(p.text)),
+            ratatui::text::Span::styled(rust_i18n::t!("common.close").to_string(), base.fg(p.overlay0)),
+            ratatui::text::Span::styled(rust_i18n::t!("overlay.esc_enter").to_string(), base.fg(p.text)),
         ]);
         ratatui::widgets::Widget::render(
             ratatui::widgets::Paragraph::new(footer_line),
@@ -900,10 +900,10 @@ fn render_navigator_overlay(
         i.x,
         i.bottom() - 1,
         i.width,
-        if n.search_focused {
-            " search type · move ↑↓/ctrl+n/p · open enter · back esc"
+        &if n.search_focused {
+            rust_i18n::t!("nav.search_footer").to_string()
         } else {
-            " move j/k · expand space · filter a/b/w/i/d · search / · open enter · close esc"
+            rust_i18n::t!("nav.browse_footer").to_string()
         },
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
@@ -943,7 +943,7 @@ fn help_lines(
         .max()
         .unwrap_or(8);
     if groups.is_empty() {
-        let message = " no matching keybinds";
+        let message = rust_i18n::t!("keybind.no_match").to_string();
         return vec![(
             message.chars().count(),
             Line::from(Span::styled(
@@ -1015,14 +1015,15 @@ fn render_help_overlay(
             .add_modifier(Modifier::BOLD),
     );
     let close = Rect::new(i.right() - 13, i.y, 13, 1);
+    let close_label = if h.search_focused {
+        rust_i18n::t!("overlay.esc_back").to_string()
+    } else {
+        rust_i18n::t!("overlay.esc_close").to_string()
+    };
     button(
         b,
         close,
-        if h.search_focused {
-            " esc back "
-        } else {
-            " esc close "
-        },
+        &close_label,
         Style::default()
             .fg(contrast(p))
             .bg(p.accent)
@@ -1037,7 +1038,7 @@ fn render_help_overlay(
         &if h.search_focused {
             format!(" / {}", h.query)
         } else {
-            " / press / to filter by command or shortcut".to_owned()
+            format!(" /{}", rust_i18n::t!("keybind.filter_hint"))
         },
         Style::default()
             .fg(if h.search_focused { p.text } else { p.overlay0 })
@@ -1101,10 +1102,10 @@ fn render_help_overlay(
         i.x,
         i.bottom() - 1,
         i.width,
-        if h.search_focused {
-            " filter type/backspace · clear ctrl+u · scroll ↑↓/pgup/pgdn · back esc"
+        &if h.search_focused {
+            rust_i18n::t!("keybind.filter_footer").to_string()
         } else {
-            " search / · scroll j/k/↑↓/pgup/pgdn · close esc/enter"
+            rust_i18n::t!("keybind.browse_footer").to_string()
         },
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
@@ -1156,7 +1157,7 @@ fn render_confirm_close_overlay(
     button(
         b,
         *ok,
-        " ↵ confirm ",
+        &rust_i18n::t!("overlay.confirm_btn").to_string(),
         Style::default()
             .fg(contrast(p))
             .bg(p.red)
@@ -1165,7 +1166,7 @@ fn render_confirm_close_overlay(
     button(
         b,
         *cancel,
-        " esc cancel ",
+        &rust_i18n::t!("overlay.esc_cancel").to_string(),
         Style::default()
             .fg(p.text)
             .bg(p.surface0)

@@ -317,6 +317,8 @@ nav:
   tab_label: "tab: %{name}"
   pane_label: "pane %{number}"
   shell: "shell"
+  search_footer: " search type · move ↑↓/ctrl+n/p · open enter · back esc"
+  browse_footer: " move j/k · expand space · filter a/b/w/i/d · search / · open enter · close esc"
 
 # dialog 对话框 (dialogs.rs)
 dialog:
@@ -461,6 +463,9 @@ keybind:
   resize_pane_down: "resize pane down"
   resize_pane_up: "resize pane up"
   resize_pane_right: "resize pane right"
+  no_match: " no matching keybinds"
+  filter_footer: " filter type/backspace · clear ctrl+u · scroll ↑↓/pgup/pgdn · back esc"
+  browse_footer: " search / · scroll j/k/↑↓/pgup/pgdn · close esc/enter"
 
 # release 发布说明 (release_notes.rs)
 release:
@@ -562,3 +567,12 @@ state:
   wt_open: "open"
   wt_detached: "detached"
   wt_root: "root"
+
+# overlay 底部按钮与页脚 (shell/overlays.rs)
+overlay:
+  esc_close: " esc close "
+  esc_back: " esc back "
+  esc_cancel: " esc cancel "
+  confirm_btn: " ↵ confirm "
+  wheel: "wheel ↑↓"
+  esc_enter: " esc / enter "

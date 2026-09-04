@@ -137,43 +137,23 @@ impl ClientPaneMoveOverlay {
             .filter(|pane| pane.tab_id == self.source_tab_id && pane.pane_id != self.source_pane_id)
             .collect();
         targets.sort_by_key(|pane| pane.pane_id.clone());
-        let mut entries = Vec::with_capacity(targets.len() * 4);
+        let mut entries = Vec::with_capacity(targets.len());
         for target in targets {
             let pane_label = Self::pane_display_name(snapshot, target);
-            for placement in [
-                crate::api::schema::PaneDirection::Right,
-                crate::api::schema::PaneDirection::Down,
-                crate::api::schema::PaneDirection::Left,
-                crate::api::schema::PaneDirection::Up,
-            ] {
-                let dir = match placement {
-                    crate::api::schema::PaneDirection::Left => {
-                        rust_i18n::t!("state.pane_dir_left").to_string()
-                    }
-                    crate::api::schema::PaneDirection::Right => {
-                        rust_i18n::t!("state.pane_dir_right").to_string()
-                    }
-                    crate::api::schema::PaneDirection::Up => {
-                        rust_i18n::t!("state.pane_dir_up").to_string()
-                    }
-                    crate::api::schema::PaneDirection::Down => {
-                        rust_i18n::t!("state.pane_dir_down").to_string()
-                    }
-                };
-                let label = rust_i18n::t!(
-                    "state.pane_reposition_to",
-                    dir = dir,
-                    pane = pane_label.clone()
-                )
-                .to_string();
-                entries.push((
-                    label,
-                    ClientPaneMoveEntry::Reposition {
-                        target_pane_id: target.pane_id.clone(),
-                        placement,
-                    },
-                ));
-            }
+            let dir = rust_i18n::t!("state.pane_dir_right").to_string();
+            let label = rust_i18n::t!(
+                "state.pane_reposition_to",
+                dir = dir,
+                pane = pane_label.clone()
+            )
+            .to_string();
+            entries.push((
+                label,
+                ClientPaneMoveEntry::Reposition {
+                    target_pane_id: target.pane_id.clone(),
+                    placement: crate::api::schema::PaneDirection::Right,
+                },
+            ));
         }
         entries
     }
@@ -224,16 +204,13 @@ impl ClientPaneMoveOverlay {
                     .filter(|tab| tab.tab_id != self.source_tab_id)
                     .count()
             }
-            ClientPaneMoveMode::Reposition => {
-                snapshot
-                    .panes
-                    .iter()
-                    .filter(|pane| {
-                        pane.tab_id == self.source_tab_id && pane.pane_id != self.source_pane_id
-                    })
-                    .count()
-                    * 4
-            }
+            ClientPaneMoveMode::Reposition => snapshot
+                .panes
+                .iter()
+                .filter(|pane| {
+                    pane.tab_id == self.source_tab_id && pane.pane_id != self.source_pane_id
+                })
+                .count(),
             ClientPaneMoveMode::Preset => 5,
         }
     }

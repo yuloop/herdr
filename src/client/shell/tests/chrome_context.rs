@@ -477,11 +477,16 @@ fn pane_move_overlay_reposition_lists_targets_and_submits() {
                 ClientPaneMoveEntry::Reposition { target_pane_id, .. }
                     if target_pane_id == "pane_2"
             )));
+            assert!(entries.iter().all(|(_, e)| matches!(
+                e,
+                ClientPaneMoveEntry::Reposition { placement, .. }
+                    if *placement == crate::api::schema::PaneDirection::Right
+            )));
             entries.len()
         }
         other => panic!("pane move overlay, got {other:?}"),
     };
-    assert!(count >= 4);
+    assert_eq!(count, 1);
     let mut outcome = ClientShellInput::default();
     state.submit_pane_move(&mut outcome);
     let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {

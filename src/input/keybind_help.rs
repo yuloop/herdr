@@ -93,19 +93,14 @@ pub(crate) fn keybind_help_groups(
                 ),
                 entry(
                     binding_label(&keybinds.open_notification_target),
-                    Cow::Owned(
-                        rust_i18n::t!("keybind.open_notification_target").to_string(),
-                    ),
+                    Cow::Owned(rust_i18n::t!("keybind.open_notification_target").to_string()),
                 ),
             ],
         ),
         (
             Cow::Owned(rust_i18n::t!("keybind.group_navigation").to_string()),
             vec![
-                entry(
-                    "esc",
-                    Cow::Owned(rust_i18n::t!("keybind.back").to_string()),
-                ),
+                entry("esc", Cow::Owned(rust_i18n::t!("keybind.back").to_string())),
                 entry(
                     format!(
                         "{} / {}",
@@ -163,9 +158,7 @@ pub(crate) fn keybind_help_groups(
                 ),
                 entry(
                     binding_label(&keybinds.remove_worktree),
-                    Cow::Owned(
-                        rust_i18n::t!("keybind.delete_worktree_checkout").to_string(),
-                    ),
+                    Cow::Owned(rust_i18n::t!("keybind.delete_worktree_checkout").to_string()),
                 ),
                 entry(
                     binding_label(&keybinds.rename_workspace),

@@ -379,11 +379,23 @@ fn render_release_notes_overlay(
 
     if let Some(footer_area) = stack.footer {
         let footer_line = ratatui::text::Line::from(vec![
-            ratatui::text::Span::styled(rust_i18n::t!("common.scroll").to_string(), base.fg(p.overlay0)),
-            ratatui::text::Span::styled(rust_i18n::t!("overlay.wheel").to_string(), base.fg(p.text)),
+            ratatui::text::Span::styled(
+                rust_i18n::t!("common.scroll").to_string(),
+                base.fg(p.overlay0),
+            ),
+            ratatui::text::Span::styled(
+                rust_i18n::t!("overlay.wheel").to_string(),
+                base.fg(p.text),
+            ),
             ratatui::text::Span::styled("  ·  ", base.fg(p.overlay0)),
-            ratatui::text::Span::styled(rust_i18n::t!("common.close").to_string(), base.fg(p.overlay0)),
-            ratatui::text::Span::styled(rust_i18n::t!("overlay.esc_enter").to_string(), base.fg(p.text)),
+            ratatui::text::Span::styled(
+                rust_i18n::t!("common.close").to_string(),
+                base.fg(p.overlay0),
+            ),
+            ratatui::text::Span::styled(
+                rust_i18n::t!("overlay.esc_enter").to_string(),
+                base.fg(p.text),
+            ),
         ]);
         ratatui::widgets::Widget::render(
             ratatui::widgets::Paragraph::new(footer_line),
@@ -491,11 +503,23 @@ fn render_product_announcement_overlay(
 
     if let Some(footer_area) = stack.footer {
         let footer_line = ratatui::text::Line::from(vec![
-            ratatui::text::Span::styled(rust_i18n::t!("common.scroll").to_string(), base.fg(p.overlay0)),
-            ratatui::text::Span::styled(rust_i18n::t!("overlay.wheel").to_string(), base.fg(p.text)),
+            ratatui::text::Span::styled(
+                rust_i18n::t!("common.scroll").to_string(),
+                base.fg(p.overlay0),
+            ),
+            ratatui::text::Span::styled(
+                rust_i18n::t!("overlay.wheel").to_string(),
+                base.fg(p.text),
+            ),
             ratatui::text::Span::styled("  ·  ", base.fg(p.overlay0)),
-            ratatui::text::Span::styled(rust_i18n::t!("common.close").to_string(), base.fg(p.overlay0)),
-            ratatui::text::Span::styled(rust_i18n::t!("overlay.esc_enter").to_string(), base.fg(p.text)),
+            ratatui::text::Span::styled(
+                rust_i18n::t!("common.close").to_string(),
+                base.fg(p.overlay0),
+            ),
+            ratatui::text::Span::styled(
+                rust_i18n::t!("overlay.esc_enter").to_string(),
+                base.fg(p.text),
+            ),
         ]);
         ratatui::widgets::Widget::render(
             ratatui::widgets::Paragraph::new(footer_line),
@@ -788,10 +812,8 @@ fn render_navigator_overlay(
         format!(
             " / {}",
             match f {
-                ClientNavigatorFilter::Blocked =>
-                    rust_i18n::t!("status.blocked").to_string(),
-                ClientNavigatorFilter::Working =>
-                    rust_i18n::t!("status.working").to_string(),
+                ClientNavigatorFilter::Blocked => rust_i18n::t!("status.blocked").to_string(),
+                ClientNavigatorFilter::Working => rust_i18n::t!("status.working").to_string(),
                 ClientNavigatorFilter::Idle => rust_i18n::t!("status.idle").to_string(),
                 ClientNavigatorFilter::Done => rust_i18n::t!("status.done").to_string(),
             }

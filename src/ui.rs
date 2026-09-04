@@ -11,8 +11,8 @@ mod text;
 mod widgets;
 
 pub(crate) use self::onboarding::{
-    onboarding_continue_label, onboarding_description, onboarding_help_suffix,
-    onboarding_next, onboarding_prefix_suffix, onboarding_subtitle, onboarding_title,
+    onboarding_continue_label, onboarding_description, onboarding_help_suffix, onboarding_next,
+    onboarding_prefix_suffix, onboarding_subtitle, onboarding_title,
     onboarding_welcome_continue_rect, ONBOARDING_HELP_LABEL, ONBOARDING_PREFIX_LABEL,
 };
 #[cfg(all(test, unix))]

@@ -199,9 +199,8 @@ impl ClientShellState {
             .is_some_and(|worktree| worktree.is_linked_worktree);
         let kind = match action {
             KeybindAction::NewWorktree | KeybindAction::OpenWorktree if linked => {
-                self.endpoint_error = Some(
-                    rust_i18n::t!("dialog.worktree_parent_only").to_string(),
-                );
+                self.endpoint_error =
+                    Some(rust_i18n::t!("dialog.worktree_parent_only").to_string());
                 outcome.repaint = true;
                 return;
             }

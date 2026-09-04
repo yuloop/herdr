@@ -4,6 +4,7 @@ use super::*;
 pub(super) enum ClientGlobalMenuAction {
     Binding(crate::input::KeybindAction),
     WhatsNew,
+    RestoreRightClick,
 }
 
 pub(super) fn global_menu_attention(snapshot: &ClientShellSnapshot) -> bool {
@@ -50,6 +51,17 @@ pub(super) fn global_menu_items(
         rust_i18n::t!("state.detach").to_string(),
         ClientGlobalMenuAction::Binding(crate::input::KeybindAction::Detach),
     ));
+    let focused_passthrough = snapshot
+        .focused_pane_id
+        .as_deref()
+        .and_then(|pane_id| snapshot.panes.iter().find(|pane| pane.pane_id == pane_id))
+        .is_some_and(|pane| pane.right_click_passthrough);
+    if focused_passthrough {
+        items.push((
+            rust_i18n::t!("state.restore_right_click").to_string(),
+            ClientGlobalMenuAction::RestoreRightClick,
+        ));
+    }
     items
 }
 
@@ -104,6 +116,23 @@ impl ClientShellState {
                 self.record_binding(crate::input::KeybindMatch::Action(binding), outcome)
             }
             ClientGlobalMenuAction::WhatsNew => self.open_release_notes(),
+            ClientGlobalMenuAction::RestoreRightClick => {
+                if let Some(pane_id) = self
+                    .snapshot
+                    .as_deref()
+                    .and_then(|snapshot| snapshot.focused_pane_id.clone())
+                {
+                    self.push_endpoint_method(
+                        crate::api::schema::Method::PaneInputSet(
+                            crate::api::schema::PaneInputSetParams {
+                                pane_id,
+                                right_click: crate::api::schema::PaneRightClickTarget::Herdr,
+                            },
+                        ),
+                        outcome,
+                    );
+                }
+            }
         }
         outcome.repaint = true;
     }

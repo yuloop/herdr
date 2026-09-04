@@ -616,3 +616,50 @@ fn pane_move_reposition_labels_show_project_and_agent() {
         );
     }
 }
+
+#[test]
+fn global_menu_shows_restore_right_click_only_for_passthrough_pane() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let items =
+        super::super::global_menu::global_menu_items(state.snapshot.as_deref().expect("snapshot"));
+    assert!(
+        items.iter().all(|(_, action)| *action
+            != super::super::global_menu::ClientGlobalMenuAction::RestoreRightClick),
+        "restore item must stay hidden when passthrough is off"
+    );
+
+    let mut snap = snapshot();
+    snap.panes[0].right_click_passthrough = true;
+    state.set_snapshot(Box::new(snap));
+    let items =
+        super::super::global_menu::global_menu_items(state.snapshot.as_deref().expect("snapshot"));
+    let index = items
+        .iter()
+        .position(|(_, action)| {
+            *action == super::super::global_menu::ClientGlobalMenuAction::RestoreRightClick
+        })
+        .expect("restore item for passthrough pane");
+    assert!(
+        items[index].0.contains("右键") || items[index].0.contains("right-click"),
+        "restore item label should mention right-click, got {}",
+        items[index].0
+    );
+
+    state.set_pane_surface(surface());
+    state.overlay = Some(ClientShellOverlay::GlobalMenu(ClientGlobalMenuOverlay {
+        highlighted: index,
+    }));
+    let mut outcome = ClientShellInput::default();
+    state.activate_global_menu_item(index, &mut outcome);
+    let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+        panic!("restore should use endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneInputSet(params)
+            if params.pane_id == "pane_1"
+                && params.right_click == crate::api::schema::PaneRightClickTarget::Herdr
+    ));
+    assert!(state.overlay.is_none());
+}

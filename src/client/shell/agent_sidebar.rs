@@ -71,16 +71,6 @@ pub(super) fn render_agent_panel(
     if area.height < 2 {
         return;
     }
-    put_text(
-        buffer,
-        area.x,
-        area.y + 1,
-        area.width,
-        &rust_i18n::t!("sidebar.agents").to_string(),
-        Style::default()
-            .fg(config.palette.overlay0)
-            .add_modifier(Modifier::BOLD),
-    );
     let sort_label: String =
         snapshot
             .agent_view_label
@@ -94,6 +84,16 @@ pub(super) fn render_agent_panel(
                 }
             });
     let sort_width = display_width(&sort_label).min(area.width as usize) as u16;
+    put_text(
+        buffer,
+        area.x,
+        area.y + 1,
+        area.width.saturating_sub(sort_width),
+        &rust_i18n::t!("sidebar.agents").to_string(),
+        Style::default()
+            .fg(config.palette.overlay0)
+            .add_modifier(Modifier::BOLD),
+    );
     let sort_rect = Rect::new(
         area.right().saturating_sub(sort_width),
         area.y + 1,

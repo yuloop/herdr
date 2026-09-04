@@ -4,9 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   push:
-    branches: [master, windows, deploy/zh-with-perf]
-    paths-ignore:
-      - "website/**"
+    branches: [master, windows]
 
 permissions:
   contents: read

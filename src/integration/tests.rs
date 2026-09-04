@@ -229,7 +229,6 @@ fn windows_supports_portable_integrations() {
     assert!(integration_target_supported(IntegrationTarget::Kilo));
     assert!(integration_target_supported(IntegrationTarget::Droid));
     assert!(integration_target_supported(IntegrationTarget::Kimi));
-    assert!(integration_target_supported(IntegrationTarget::Qwen));
     assert!(integration_target_supported(IntegrationTarget::Qodercli));
     assert!(integration_target_supported(IntegrationTarget::Qwen));
 }
@@ -350,14 +349,6 @@ fn qodercli_availability_checks_windows_aliases() {
         std::env::remove_var("PATH");
     }
     let _ = fs::remove_dir_all(base);
-}
-
-#[test]
-fn qwen_target_serializes_and_uses_canonical_command() {
-    let target = crate::api::schema::IntegrationTarget::Qwen;
-    assert_eq!(serde_json::to_string(&target).unwrap(), r#""qwen""#);
-    assert_eq!(integration_target_label(target), "qwen");
-    assert_eq!(integration_target_command(target), "qwen");
 }
 
 #[test]
@@ -2768,7 +2759,6 @@ fn bundled_integration_asset_versions_match_expected_versions() {
             QODERCLI_HOOK_ASSET,
             QODERCLI_INTEGRATION_VERSION,
         ),
-        ("qwen", QWEN_HOOK_ASSET, QWEN_INTEGRATION_VERSION),
         ("cursor", CURSOR_HOOK_ASSET, CURSOR_INTEGRATION_VERSION),
         (
             "antigravity_cli",
@@ -2883,19 +2873,6 @@ fn bundled_integration_assets_report_session_refs() {
     assert!(QODERCLI_HOOK_ASSET.contains("--agent-session-id"));
     assert!(!QODERCLI_HOOK_ASSET.contains("report-agent\""));
     assert!(!QODERCLI_HOOK_ASSET.contains("release-agent"));
-    assert!(QWEN_HOOK_ASSET.contains("HERDR_INTEGRATION_ID=qwen"));
-    assert!(QWEN_HOOK_ASSET.contains("herdr:qwen"));
-    assert!(QWEN_HOOK_ASSET.contains("session_id"));
-    assert!(
-        QWEN_HOOK_ASSET.contains("pane.report_agent_session")
-            || QWEN_HOOK_ASSET.contains("report-agent-session")
-    );
-    assert!(
-        QWEN_HOOK_ASSET.contains("pane.report_agent") || QWEN_HOOK_ASSET.contains("report-agent")
-    );
-    assert!(
-        QWEN_HOOK_ASSET.contains("pane.release_agent") || QWEN_HOOK_ASSET.contains("release-agent")
-    );
     assert!(CURSOR_HOOK_ASSET.contains("HERDR_INTEGRATION_ID=cursor"));
     assert!(CURSOR_HOOK_ASSET.contains("conversation_id"));
     assert!(CURSOR_HOOK_ASSET.contains("conversationId"));
@@ -3242,258 +3219,6 @@ fn install_qodercli_errors_when_config_dir_missing() {
     );
 
     std::env::remove_var(QODERCLI_CONFIG_DIR_ENV_VAR);
-    let _ = fs::remove_dir_all(base);
-}
-
-fn qwen_command_entries<'a>(settings: &'a Value, event: &str, action: &str) -> Vec<&'a Value> {
-    settings["hooks"][event]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|entry| {
-            entry["hooks"].as_array().into_iter().flatten().any(|hook| {
-                hook.get("type").and_then(Value::as_str) == Some("command")
-                    && hook
-                        .get("command")
-                        .and_then(Value::as_str)
-                        .is_some_and(|command| {
-                            command.contains(QWEN_HOOK_INSTALL_NAME) && command.ends_with(action)
-                        })
-            })
-        })
-        .collect()
-}
-
-#[test]
-fn qwen_hook_event_contract_matches_official_lifecycle() {
-    assert_eq!(
-        QWEN_HOOK_EVENTS,
-        [
-            ("SessionStart", None, "session"),
-            ("UserPromptSubmit", None, "working"),
-            ("PreToolUse", None, "working"),
-            ("PostToolUse", None, "working"),
-            ("PostToolUseFailure", None, "working"),
-            ("PreCompact", None, "working"),
-            ("PostCompact", None, "working"),
-            ("PermissionRequest", None, "blocked"),
-            ("Notification", Some("permission_prompt"), "blocked"),
-            ("Notification", Some("idle_prompt"), "idle"),
-            ("Stop", None, "idle"),
-            ("StopFailure", None, "idle"),
-            ("SessionEnd", None, "release"),
-        ]
-    );
-}
-
-#[test]
-fn install_qwen_merges_hooks_and_preserves_existing_settings() {
-    let _lock = integration_env_lock();
-    let base = unique_base();
-    let qwen_home = base.join("qwen-home");
-    fs::create_dir_all(&qwen_home).unwrap();
-    fs::write(
-        qwen_home.join("settings.json"),
-        r#"{
-          "model": {"name": "qwen3-coder-plus"},
-          "mcpServers": {"user": {"command": "keep-me"}},
-          "hooks": {
-            "SessionStart": [{
-              "matcher": "resume",
-              "hooks": [{"type": "command", "command": "echo user-defined"}]
-            }]
-          }
-        }"#,
-    )
-    .unwrap();
-    std::env::set_var(QWEN_HOME_ENV_VAR, &qwen_home);
-
-    let installed = install_qwen().unwrap();
-    assert_eq!(
-        installed.hook_path,
-        qwen_home.join("hooks").join(QWEN_HOOK_INSTALL_NAME)
-    );
-    assert_eq!(installed.settings_path, qwen_home.join("settings.json"));
-    assert_eq!(
-        fs::read_to_string(&installed.hook_path).unwrap(),
-        QWEN_HOOK_ASSET
-    );
-
-    let settings: Value =
-        serde_json::from_str(&fs::read_to_string(&installed.settings_path).unwrap()).unwrap();
-    assert_eq!(settings["model"]["name"], "qwen3-coder-plus");
-    assert_eq!(settings["mcpServers"]["user"]["command"], "keep-me");
-    for (event, matcher, action) in QWEN_HOOK_EVENTS {
-        let entries = qwen_command_entries(&settings, event, action);
-        assert_eq!(
-            entries.len(),
-            1,
-            "expected one qwen {event} -> {action} hook"
-        );
-        assert_eq!(
-            entries[0].get("matcher").and_then(Value::as_str),
-            matcher,
-            "unexpected matcher for qwen {event} -> {action}"
-        );
-        assert_eq!(
-            entries[0]["hooks"][0]["timeout"].as_u64(),
-            Some(QWEN_HOOK_TIMEOUT_MS)
-        );
-    }
-    assert!(settings["hooks"]["SessionStart"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|entry| entry["hooks"][0]["command"] == "echo user-defined"));
-
-    clear_integration_path_env();
-    let _ = fs::remove_dir_all(base);
-}
-
-#[test]
-fn install_qwen_is_idempotent_and_repairs_registration() {
-    let _lock = integration_env_lock();
-    let base = unique_base();
-    let qwen_home = base.join(".qwen");
-    fs::create_dir_all(&qwen_home).unwrap();
-    std::env::set_var(QWEN_HOME_ENV_VAR, &qwen_home);
-
-    install_qwen().unwrap();
-    let settings_path = qwen_home.join("settings.json");
-    let mut settings: Value =
-        serde_json::from_str(&fs::read_to_string(&settings_path).unwrap()).unwrap();
-    settings["hooks"]["PermissionRequest"][0]["matcher"] = json!("never-match");
-    fs::write(
-        &settings_path,
-        serde_json::to_string_pretty(&settings).unwrap(),
-    )
-    .unwrap();
-
-    let state = installed_integration_statuses()
-        .into_iter()
-        .find(|status| status.target == crate::api::schema::IntegrationTarget::Qwen)
-        .unwrap()
-        .state;
-    assert_eq!(state, IntegrationStatusKind::Outdated);
-
-    install_qwen().unwrap();
-    install_qwen().unwrap();
-    let settings: Value =
-        serde_json::from_str(&fs::read_to_string(&settings_path).unwrap()).unwrap();
-    for (event, matcher, action) in QWEN_HOOK_EVENTS {
-        let entries = qwen_command_entries(&settings, event, action);
-        assert_eq!(
-            entries.len(),
-            1,
-            "duplicate qwen hook for {event} -> {action}"
-        );
-        assert_eq!(entries[0].get("matcher").and_then(Value::as_str), matcher);
-    }
-    let status = installed_integration_statuses()
-        .into_iter()
-        .find(|status| status.target == crate::api::schema::IntegrationTarget::Qwen)
-        .unwrap();
-    assert_eq!(status.state, IntegrationStatusKind::Current);
-    assert_eq!(status.installed_version, Some(QWEN_INTEGRATION_VERSION));
-
-    clear_integration_path_env();
-    let _ = fs::remove_dir_all(base);
-}
-
-#[test]
-fn uninstall_qwen_removes_only_herdr_entries() {
-    let _lock = integration_env_lock();
-    let base = unique_base();
-    let qwen_home = base.join(".qwen");
-    fs::create_dir_all(&qwen_home).unwrap();
-    std::env::set_var(QWEN_HOME_ENV_VAR, &qwen_home);
-    install_qwen().unwrap();
-
-    let settings_path = qwen_home.join("settings.json");
-    let mut settings: Value =
-        serde_json::from_str(&fs::read_to_string(&settings_path).unwrap()).unwrap();
-    settings["hooks"]["Stop"]
-        .as_array_mut()
-        .unwrap()
-        .push(json!({
-            "hooks": [{"type": "command", "command": "echo keep-me", "timeout": 5000}]
-        }));
-    settings["model"] = json!({"name": "keep-model"});
-    fs::write(
-        &settings_path,
-        serde_json::to_string_pretty(&settings).unwrap(),
-    )
-    .unwrap();
-
-    let result = uninstall_qwen().unwrap();
-    assert!(result.removed_hook_file);
-    assert!(result.updated_settings);
-    assert!(!result.hook_path.is_file());
-
-    let settings: Value =
-        serde_json::from_str(&fs::read_to_string(&settings_path).unwrap()).unwrap();
-    assert_eq!(settings["model"]["name"], "keep-model");
-    assert!(settings["hooks"]["Stop"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|entry| entry["hooks"][0]["command"] == "echo keep-me"));
-    for (event, _, action) in QWEN_HOOK_EVENTS {
-        assert!(qwen_command_entries(&settings, event, action).is_empty());
-    }
-
-    clear_integration_path_env();
-    let _ = fs::remove_dir_all(base);
-}
-
-#[test]
-fn install_qwen_rejects_invalid_settings_before_writing_hook() {
-    let _lock = integration_env_lock();
-    let base = unique_base();
-    let qwen_home = base.join(".qwen");
-    fs::create_dir_all(&qwen_home).unwrap();
-    fs::write(qwen_home.join("settings.json"), "{not-json").unwrap();
-    std::env::set_var(QWEN_HOME_ENV_VAR, &qwen_home);
-
-    let error = install_qwen().unwrap_err().to_string();
-    assert!(error.contains("failed to parse"));
-    assert!(error.contains("settings.json"));
-    assert!(!qwen_home
-        .join("hooks")
-        .join(QWEN_HOOK_INSTALL_NAME)
-        .exists());
-
-    fs::write(qwen_home.join("settings.json"), r#"{"hooks":[]}"#).unwrap();
-    let error = install_qwen().unwrap_err().to_string();
-    assert!(error.contains("qwen settings hooks"));
-    assert!(!qwen_home
-        .join("hooks")
-        .join(QWEN_HOOK_INSTALL_NAME)
-        .exists());
-
-    clear_integration_path_env();
-    let _ = fs::remove_dir_all(base);
-}
-
-#[test]
-fn qwen_home_override_and_missing_directory_are_handled() {
-    let _lock = integration_env_lock();
-    let base = unique_base();
-    let qwen_home = base.join("custom-qwen");
-    std::env::set_var(QWEN_HOME_ENV_VAR, &qwen_home);
-
-    let error = install_qwen().unwrap_err().to_string();
-    assert!(error.contains("qwen config directory not found"));
-    assert!(error.contains(&qwen_home.display().to_string()));
-
-    fs::create_dir_all(&qwen_home).unwrap();
-    let installed = install_qwen().unwrap();
-    assert_eq!(
-        installed.hook_path,
-        qwen_home.join("hooks").join(QWEN_HOOK_INSTALL_NAME)
-    );
-
-    clear_integration_path_env();
     let _ = fs::remove_dir_all(base);
 }
 

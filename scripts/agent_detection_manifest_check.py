@@ -13,7 +13,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BUNDLED_DIR = PROJECT_ROOT / "src" / "detect" / "manifests"
-DEFAULT_WEBSITE_DIR = PROJECT_ROOT / "website" / "agent-detection"
+DEFAULT_PUBLISHED_DIR = PROJECT_ROOT / "distribution" / "agent-detection"
 ENGINE_SOURCE = PROJECT_ROOT / "src" / "detect" / "manifest_update.rs"
 
 MANIFEST_KEYS = {"id", "version", "min_engine_version", "updated_at", "aliases", "rules"}
@@ -53,18 +53,35 @@ MAX_MATCHERS_PER_GATE = 32
 MAX_TOTAL_MATCHERS = 1024
 MAX_MATCHER_CHARS = 512
 
-STAGED_WEBSITE_MANIFESTS = {}
+# The bundled Grok manifest is now published to the distribution catalog,
+# so no staged engine-compatibility exception remains.
+STAGED_PUBLISHED_MANIFESTS = {}
+
+# Muse is bundled on master but has not shipped in a stable binary yet. Stable
+# clients cannot identify it, so publish it with the release that first ships
+# the corresponding Agent variant and remove this exact-content exception.
+UNPUBLISHED_BUNDLED_MANIFESTS = {
+    "muse": (
+        "2026.08.26.1",
+        "b69c4d87fa9c19e3e6453b706fbe39c98a8b33ffbaa48e8cd5ae6751e9615074",
+    ),
+}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundled-dir", type=Path, default=DEFAULT_BUNDLED_DIR)
-    parser.add_argument("--website-dir", type=Path, default=DEFAULT_WEBSITE_DIR)
+    parser.add_argument("--published-dir", type=Path, default=DEFAULT_PUBLISHED_DIR)
     parser.add_argument("--engine-version", type=int)
     parser.add_argument(
-        "--require-website",
+        "--require-published",
         action="store_true",
-        help="fail if website agent-detection assets or catalog are missing",
+        help="fail if published agent-detection assets or catalog are missing",
+    )
+    parser.add_argument(
+        "--require-all-published",
+        action="store_true",
+        help="fail if any bundled manifest is intentionally held for a future stable release",
     )
     return parser.parse_args()
 
@@ -277,11 +294,13 @@ def load_manifest_dir(path: Path, engine_version: int) -> dict[str, tuple[Path, 
 
 
 def validate_catalog(
-    website_dir: Path,
+    published_dir: Path,
     bundled: dict[str, tuple[Path, dict]],
     engine_version: int,
+    *,
+    allow_unpublished: bool = False,
 ) -> None:
-    catalog_path = website_dir / "index.toml"
+    catalog_path = published_dir / "index.toml"
     catalog = load_toml(catalog_path)
     if set(catalog) != {"schema_version", "agents"}:
         raise CheckError(f"{catalog_path}: expected only schema_version and agents")
@@ -305,7 +324,7 @@ def validate_catalog(
             raise CheckError(f"{catalog_path}: unsafe path for {agent_id}: {rel_path}")
         if agent_id not in bundled:
             raise CheckError(f"{catalog_path}: unknown agent {agent_id}; binary cannot identify it")
-        manifest_path = website_dir / rel_path
+        manifest_path = published_dir / rel_path
         manifest = validate_manifest(manifest_path, engine_version)
         if manifest["id"] != agent_id:
             raise CheckError(f"{manifest_path}: id {manifest['id']} does not match catalog {agent_id}")
@@ -313,17 +332,17 @@ def validate_catalog(
 
         bundled_path, bundled_manifest = bundled[agent_id]
         cmp = compare_versions(manifest["version"], bundled_manifest["version"], manifest_path)
-        staged_manifest = STAGED_WEBSITE_MANIFESTS.get(agent_id)
-        website_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+        staged_manifest = STAGED_PUBLISHED_MANIFESTS.get(agent_id)
+        published_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
         stages_new_engine_manifest = (
             staged_manifest
-            == (bundled_manifest["version"], manifest["version"], website_digest)
+            == (bundled_manifest["version"], manifest["version"], published_digest)
             and bundled_manifest["min_engine_version"] == engine_version
             and manifest["min_engine_version"] < bundled_manifest["min_engine_version"]
         )
         if cmp < 0 and not stages_new_engine_manifest:
             raise CheckError(
-                f"{manifest_path}: website version {manifest['version']} is lower than bundled "
+                f"{manifest_path}: published version {manifest['version']} is lower than bundled "
                 f"{bundled_manifest['version']} in {bundled_path}"
             )
         if cmp == 0 and manifest_path.read_text(encoding="utf-8") != bundled_path.read_text(encoding="utf-8"):
@@ -332,13 +351,22 @@ def validate_catalog(
             )
 
     missing = sorted(set(bundled) - set(seen))
-    if missing:
-        raise CheckError(f"{catalog_path}: missing bundled agent(s): {', '.join(missing)}")
+    unexpected_missing = []
+    for agent_id in missing:
+        bundled_path, bundled_manifest = bundled[agent_id]
+        staged = UNPUBLISHED_BUNDLED_MANIFESTS.get(agent_id) if allow_unpublished else None
+        digest = hashlib.sha256(bundled_path.read_bytes()).hexdigest()
+        if staged != (bundled_manifest["version"], digest):
+            unexpected_missing.append(agent_id)
+    if unexpected_missing:
+        raise CheckError(
+            f"{catalog_path}: missing bundled agent(s): {', '.join(unexpected_missing)}"
+        )
 
     catalog_paths = set(seen.values()) | {"index.toml"}
-    extra = sorted(path.name for path in website_dir.glob("*.toml") if path.name not in catalog_paths)
+    extra = sorted(path.name for path in published_dir.glob("*.toml") if path.name not in catalog_paths)
     if extra:
-        raise CheckError(f"{website_dir}: TOML file(s) not listed in catalog: {', '.join(extra)}")
+        raise CheckError(f"{published_dir}: TOML file(s) not listed in catalog: {', '.join(extra)}")
 
 
 def main() -> int:
@@ -346,10 +374,15 @@ def main() -> int:
     try:
         engine_version = read_engine_version(args.engine_version)
         bundled = load_manifest_dir(args.bundled_dir, engine_version)
-        if args.require_website or args.website_dir.exists():
-            if not args.website_dir.is_dir():
-                raise CheckError(f"{args.website_dir}: website manifest directory is missing")
-            validate_catalog(args.website_dir, bundled, engine_version)
+        if args.require_published or args.require_all_published or args.published_dir.exists():
+            if not args.published_dir.is_dir():
+                raise CheckError(f"{args.published_dir}: published manifest directory is missing")
+            validate_catalog(
+                args.published_dir,
+                bundled,
+                engine_version,
+                allow_unpublished=not args.require_all_published,
+            )
     except CheckError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

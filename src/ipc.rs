@@ -7,10 +7,6 @@ use std::path::Path;
 #[cfg(unix)]
 use interprocess::local_socket::traits::Stream as _;
 
-#[cfg(windows)]
-mod windows_listener;
-#[cfg(windows)]
-use windows_listener::bind_windows_local_listener;
 pub(crate) type LocalListener = interprocess::local_socket::Listener;
 pub(crate) type LocalStream = interprocess::local_socket::Stream;
 
@@ -69,7 +65,16 @@ pub(crate) fn bind_local_listener(path: &Path) -> io::Result<LocalListener> {
 
     #[cfg(windows)]
     {
-        bind_windows_local_listener(path)
+        use interprocess::local_socket::{prelude::*, GenericNamespaced, ListenerOptions};
+
+        let name = path.to_string_lossy().to_string();
+        let name = name.to_ns_name::<GenericNamespaced>()?;
+        let listener = ListenerOptions::new()
+            .name(name)
+            .reclaim_name(false)
+            .create_sync()?;
+        fs::write(path, windows_socket_marker())?;
+        Ok(listener)
     }
 }
 
@@ -143,7 +148,23 @@ pub(crate) fn bind_private_local_listener(path: &Path) -> io::Result<LocalListen
 
     #[cfg(windows)]
     {
-        bind_windows_local_listener(path)
+        use interprocess::local_socket::{prelude::*, GenericNamespaced, ListenerOptions};
+        use interprocess::os::windows::local_socket::ListenerOptionsExt as _;
+        use interprocess::os::windows::security_descriptor::SecurityDescriptor;
+        use widestring::U16CString;
+
+        let sddl = U16CString::from_str("D:P(A;;GA;;;SY)(A;;GA;;;OW)")
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+        let security_descriptor = SecurityDescriptor::deserialize(&sddl)?;
+        let name = path.to_string_lossy().to_string();
+        let name = name.to_ns_name::<GenericNamespaced>()?;
+        let listener = ListenerOptions::new()
+            .name(name)
+            .reclaim_name(false)
+            .security_descriptor(security_descriptor)
+            .create_sync()?;
+        fs::write(path, windows_socket_marker())?;
+        Ok(listener)
     }
 }
 

@@ -60,7 +60,7 @@ headless_cols = 160
 headless_rows = 50
 ```
 
-An attached client remains authoritative for the shared runtime size. After it detaches, existing pane PTYs retain their last attached size while new headless layout uses the configured fallback.
+With one attached client, all tabs follow its size. With multiple clients, each viewed tab follows the client that most recently focused, selected, or interacted with it. When all but one client detach, all tabs immediately return to the remaining client's size. When no clients remain, existing pane PTYs retain their last size and new headless layout uses the configured fallback.
 
 ## Terminal defaults
 
@@ -71,7 +71,7 @@ Set the executable Herdr uses for newly created interactive panes:
 default_shell = "nu"
 ```
 
-When unset or empty, Herdr uses `$SHELL`, then `/bin/sh` on Unix. On Windows, it tries PowerShell 7 (`pwsh.exe`), Windows PowerShell (`powershell.exe`), and Command Prompt (`cmd.exe`) in that order. This is an executable name or path, not a shell command line. Existing panes keep their current shell until they are recreated. Custom command keybinding strings run through `/bin/sh -c` for pane commands and `/bin/sh -lc` for detached commands on Unix; on Windows they run through `cmd.exe /d /c`.
+When unset or empty, Herdr uses `$SHELL`, then `/bin/sh` on Unix and PowerShell on Windows. This is an executable name or path, not a shell command line. Existing panes keep their current shell until they are recreated. Custom command keybinding strings run through `/bin/sh -c` for pane commands and `/bin/sh -lc` for detached commands on Unix; on Windows they run through `cmd.exe /d /c`.
 
 Set how Herdr starts newly created interactive pane shells:
 
@@ -298,10 +298,6 @@ The active palette is applied in this order: built-in theme, `[theme.custom]`, t
 
 The sidebar is the main Herdr dashboard. Search `ui.` in the [Config reference](/docs/config-reference/) for sizing, collapsed mode, Agent panel ordering, mouse behavior, pane borders, and other presentation settings.
 
-Set `language = "zh"` under `[ui]` to use the embedded Simplified Chinese UI and CLI translations. The setting is shared by every platform; on Windows the default config path is `%APPDATA%\herdr\config.toml`, while Linux and macOS use `~/.config/herdr/config.toml`. Values beginning with `zh`, including `zh-CN` and `zh-Hans`, select Chinese; `en` is the default.
-
-Mouse selection defaults to manual copying: drag-selecting or double-clicking terminal text retains the selection until `Ctrl+C`, a host-forwarded `Cmd+C`, `Enter`, or `y` copies it; `Esc` cancels it. Set `copy_on_select = true` or `copy_on_select = "clipboard"` to copy immediately after selecting. The equivalent manual values are `false` and `"manual"`; `"disabled"` turns mouse text selection off entirely.
-
 Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. Prefix, Navigate, Copy, and Resize mode bars temporarily replace the bottom tab row while active. The default is `"top"`.
 
 Configure an ordered tmux-style status area at the right edge of the tab row:
@@ -403,7 +399,7 @@ rows = [
 
 `fg` accepts strict `#RGB` or `#RRGGBB`. `bold` and `dim` accept booleans. Omitted fields preserve the token's contextual style; explicit `false` removes that modifier. Styling applies to one occurrence, so the same token may look different in another row or agent override. A foreground override replaces all semantic foregrounds inside that occurrence: for example, styled `git_status` ahead and behind counts use one color instead of their default green and red. Token styles never change separators or row backgrounds.
 
-`row_gap` controls spacing independently for the Agent and Space panels and does not add spacing between the content lines declared in `rows`. Agent entries use it as the number of blank rows between entries. Every expanded Space entry—including each indented worktree child—has its own alternating background and separator; the Space `row_gap` adds blank rows after that mandatory separator. Both settings default to `0`.
+`row_gap` controls the blank terminal rows between entries, independently for the Agent and Space panels. It defaults to `0`, which packs entries together; set it to `1` to restore the previous spacing. It does not add spacing between the content lines declared in `rows`. Consecutive indented worktree children remain packed as one Space group.
 
 Override the complete Agent layout for a known agent under `rows_by_agent`:
 

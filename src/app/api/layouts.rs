@@ -608,7 +608,7 @@ mod tests {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(
             &Config::default(),
-            true,
+            crate::app::AppPolicy::TEST,
             None,
             api_rx,
             crate::api::EventHub::default(),
@@ -727,11 +727,6 @@ mod tests {
     async fn layout_apply_replaces_tab_with_requested_tree() {
         let mut app = app_with_workspace();
         let original_tab_id = app.public_tab_id(0, 0).unwrap();
-        let command = if cfg!(windows) {
-            vec!["cmd.exe".into(), "/C".into(), "exit".into(), "0".into()]
-        } else {
-            vec!["sh".into(), "-c".into(), "true".into()]
-        };
 
         let response = app.handle_layout_apply(
             "req".into(),
@@ -752,7 +747,7 @@ mod tests {
                     second: Box::new(LayoutNode::Pane {
                         pane: LayoutPane {
                             label: Some("tests".into()),
-                            command: Some(command.clone()),
+                            command: Some(vec!["sh".into(), "-c".into(), "true".into()]),
                             env: std::collections::HashMap::from([(
                                 "HERDR_ROLE".into(),
                                 "tests".into(),
@@ -764,8 +759,7 @@ mod tests {
             },
         );
 
-        let success: SuccessResponse = serde_json::from_str(&response)
-            .unwrap_or_else(|error| panic!("invalid layout apply response ({error}): {response}"));
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
         let ResponseResult::LayoutApply { layout } = success.result else {
             panic!("expected layout apply response");
         };
@@ -793,7 +787,10 @@ mod tests {
         };
         assert_eq!(first_pane.label.as_deref(), Some("editor"));
         assert_eq!(second_pane.label.as_deref(), Some("tests"));
-        assert_eq!(second_pane.command, Some(command));
+        assert_eq!(
+            second_pane.command,
+            Some(vec!["sh".into(), "-c".into(), "true".into()])
+        );
         assert!(matches!(
             &app.event_hub.events_after(0).last().expect("layout event").1.data,
             EventData::LayoutUpdated { layout }

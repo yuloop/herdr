@@ -179,19 +179,6 @@ fn install_target_inner(target: crate::api::schema::IntegrationTarget) -> io::Re
                 ),
             ]
         }
-        crate::api::schema::IntegrationTarget::Qwen => {
-            let installed = install_qwen()?;
-            vec![
-                format!(
-                    "installed qwen integration hook to {}",
-                    installed.hook_path.display()
-                ),
-                format!(
-                    "ensured qwen settings at {}",
-                    installed.settings_path.display()
-                ),
-            ]
-        }
         crate::api::schema::IntegrationTarget::Qodercli => {
             let installed = install_qodercli()?;
             vec![
@@ -554,33 +541,6 @@ pub(crate) fn uninstall_target(
                 messages.push(format!(
                     "no hermes plugin entry found in {}",
                     result.config_path.display()
-                ));
-            }
-            messages
-        }
-        crate::api::schema::IntegrationTarget::Qwen => {
-            let result = uninstall_qwen()?;
-            let mut messages = Vec::new();
-            if result.removed_hook_file {
-                messages.push(format!(
-                    "removed qwen hook at {}",
-                    result.hook_path.display()
-                ));
-            } else {
-                messages.push(format!(
-                    "no qwen hook found at {}",
-                    result.hook_path.display()
-                ));
-            }
-            if result.updated_settings {
-                messages.push(format!(
-                    "removed herdr qwen hook entries from {}",
-                    result.settings_path.display()
-                ));
-            } else {
-                messages.push(format!(
-                    "no herdr qwen hook entries found in {}",
-                    result.settings_path.display()
                 ));
             }
             messages

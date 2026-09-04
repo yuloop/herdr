@@ -69,6 +69,23 @@ pub(crate) const fn capabilities() -> PlatformCapabilities {
     }
 }
 
+pub(crate) fn terminal_grid_size() -> std::io::Result<(u16, u16)> {
+    #[cfg(unix)]
+    let (cols, rows) = unix_common::read_terminal_grid_size()?;
+    #[cfg(windows)]
+    let (cols, rows) = windows::read_terminal_grid_size()?;
+    #[cfg(not(any(unix, windows)))]
+    let (cols, rows) = fallback::read_terminal_grid_size()?;
+
+    if cols == 0 || rows == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "terminal reported a zero-sized grid",
+        ));
+    }
+    Ok((cols, rows))
+}
+
 #[cfg(not(windows))]
 pub fn launch_server_daemon_command(command: &mut std::process::Command) -> std::io::Result<u32> {
     command.spawn().map(|child| child.id())
@@ -200,6 +217,14 @@ pub(crate) struct RemoteSshConfigPaths {
 mod unix_common;
 #[cfg(unix)]
 pub(crate) use unix_common::{begin_cli_output, end_cli_output};
+
+#[cfg(not(windows))]
+pub(crate) fn replace_file(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> std::io::Result<()> {
+    std::fs::rename(source, destination)
+}
 
 #[cfg(not(unix))]
 pub(crate) fn begin_cli_output() {}

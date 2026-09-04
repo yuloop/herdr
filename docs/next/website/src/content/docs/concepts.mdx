@@ -23,8 +23,6 @@ A pane is a real terminal. Herdr renders the terminal output, sends input back t
 
 Panes can be split right or down. They can be renamed manually, read from the CLI, sent input, and closed.
 
-Right-click an existing pane to preview and apply a new arrangement without restarting any pane process. **Reposition pane** moves the clicked pane beside a target at a 50:50 split; hover or click a target edge, use `Tab` to cycle targets, and use arrows or `h/j/k/l` to choose an edge. **Layout templates** offers columns, rows, balanced grid, main-left, and main-top; the clicked pane becomes the first or main pane and the others keep their current visual order. Press `Enter` to apply or `Esc` to cancel. These actions affect only the current tab and are unavailable while it is zoomed.
-
 ## Mouse UI
 
 Herdr is mouse-native. You can click panes, tabs, workspaces, and agents. You can drag split borders, select text, and use right-click menus. Everything below is also reachable by mouse; keyboard bindings are an optional layer.
@@ -69,6 +67,8 @@ Use workspaces first. Use named sessions when you need completely separate panes
 By default, Herdr runs as a background server plus one or more attached clients.
 
 The server owns panes and process state. The client is the terminal UI attached to that server.
+
+With one attached client, all tabs follow its size as before. With multiple clients, each can view its own workspace and tab. Different viewed tabs follow their respective clients; when clients view the same tab, the last one to focus, select, or interact with it controls that tab's pane sizes.
 
 Detach the client with `ctrl+b q`. The server and agents continue running.
 

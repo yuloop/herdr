@@ -376,28 +376,28 @@ fn agent_command() -> Command {
         )
         .subcommand(
             Command::new("prompt")
-                .about("Submit a prompt to an agent")
+                .about(t!("cli.agent_prompt_about").to_string())
                 .override_usage("herdr agent prompt <TARGET> <TEXT> [OPTIONS]")
                 .arg(required("target", "TARGET"))
                 .arg(required("text", "TEXT"))
                 .arg(
                     flag("wait")
-                        .help("Wait for the first matching state observed after submission"),
+                        .help(t!("cli.agent_prompt_wait_help").to_string()),
                 )
                 .arg(
                     option("until", "STATUS")
                         .action(ArgAction::Append)
                         .requires("wait")
                         .value_parser(["idle", "working", "blocked", "done", "unknown"])
-                        .help("State to match after --wait; repeat for more than one state"),
+                        .help(t!("cli.agent_prompt_until_help").to_string()),
                 )
                 .arg(
                     option("timeout", "MS")
                         .requires("wait")
-                        .help("Fail after this many milliseconds"),
+                        .help(t!("cli.agent_wait_timeout_help").to_string()),
                 )
                 .after_help(
-                    "If the agent is already blocked, submission is rejected with agent_blocked before any input is sent. When an accepted submission starts from another non-working state, --wait first requires an observed state change within 5000ms; otherwise it returns agent_prompt_stalled. A shorter --timeout returns timeout instead. It then matches idle, done, or blocked by default, or any exact --until state. It does not track turns: if the agent is already working, that active turn's completion may match. Without --timeout, the settled-state wait is indefinite.",
+                    "If the agent is already blocked, submission is rejected with agent_blocked before any input is sent. When an accepted submission starts from another non-working state, --wait requires an observed working or blocked state within 5000ms; otherwise it returns agent_prompt_stalled. A caller timeout that expires first returns timeout. It then matches idle, done, or blocked by default, or any exact --until state. It does not track turns: if the agent is already working, that active turn's completion may match.",
                 ),
         )
         .subcommand(
@@ -416,16 +416,16 @@ fn agent_command() -> Command {
         .subcommand(id_command("focus", "target", t!("cli.agent_focus_about").to_string()))
         .subcommand(
             Command::new("wait")
-                .about(t!("cli.agent_wait_about").to_string())
+                .about(t!("cli.agent_wait_states_about").to_string())
                 .override_usage("herdr agent wait <TARGET> [OPTIONS]")
                 .arg(required("target", "TARGET"))
                 .arg(
                     option("until", "STATUS")
                         .action(ArgAction::Append)
                         .value_parser(["idle", "working", "blocked", "done", "unknown"])
-                        .help("State to match; repeat for more than one state"),
+                        .help(t!("cli.agent_wait_until_help").to_string()),
                 )
-                .arg(option("timeout", "MS").help("Fail after this many milliseconds"))
+                .arg(option("timeout", "MS").help(t!("cli.agent_wait_timeout_help").to_string()))
                 .after_help(
                     "Without --until, matches idle, done, or blocked. Use --until unknown explicitly when needed. Without --timeout, waits indefinitely.",
                 ),
@@ -439,7 +439,7 @@ fn agent_command() -> Command {
         )
         .subcommand(
             Command::new("start")
-                .about(t!("cli.agent_start_about").to_string())
+                .about(t!("cli.agent_start_interactive_about").to_string())
                 .override_usage(
                     "herdr agent start <NAME> --kind <KIND> --pane <ID> [OPTIONS] [-- [AGENT_ARG]...]",
                 )
@@ -448,16 +448,16 @@ fn agent_command() -> Command {
                     option("kind", "KIND")
                         .required(true)
                         .value_parser(agent_kind_values())
-                        .help("Supported agent kind and canonical executable"),
+                        .help(t!("cli.agent_start_kind_help").to_string()),
                 )
                 .arg(
                     option("pane", "ID")
                         .required(true)
-                        .help("Existing pane at an interactive shell prompt"),
+                        .help(t!("cli.agent_start_pane_help").to_string()),
                 )
                 .arg(
                     option("timeout", "MS")
-                        .help("Wait for interactive readiness (default: 30000; max: 300000)"),
+                        .help(t!("cli.agent_start_ready_help").to_string()),
                 )
                 .arg(
                     Arg::new("agent_args")
@@ -569,7 +569,7 @@ fn pane_command() -> Command {
         )
         .subcommand(
             Command::new("input")
-                .about("Set pane input routing")
+                .about(t!("cli.pane_input_about").to_string())
                 .arg(Arg::new("pane_id").value_name("PANE_ID"))
                 .args(current_pane_args())
                 .arg(
@@ -634,24 +634,24 @@ fn pane_command() -> Command {
         )
         .subcommand(
             Command::new("wait-output")
-                .about("Wait for matching pane output")
+                .about(t!("cli.wait_output_about").to_string())
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(
                     option("match", "TEXT")
                         .conflicts_with("regex")
                         .required_unless_present("regex")
-                        .help("Match a literal substring"),
+                        .help(t!("cli.pane_match_literal_help").to_string()),
                 )
                 .arg(
                     option("regex", "PATTERN")
                         .conflicts_with("match")
                         .required_unless_present("match")
-                        .help("Match a Rust regular expression"),
+                        .help(t!("cli.pane_match_regex_help").to_string()),
                 )
                 .arg(read_source_option(false))
-                .arg(option("lines", "N").help("Restrict the searched snapshot to N lines"))
-                .arg(option("timeout", "MS").help("Fail after this many milliseconds"))
-                .arg(flag("raw").help("Keep ANSI escape sequences while matching"))
+                .arg(option("lines", "N").help(t!("cli.pane_match_lines_help").to_string()))
+                .arg(option("timeout", "MS").help(t!("cli.agent_wait_timeout_help").to_string()))
+                .arg(flag("raw").help(t!("cli.pane_match_raw_help").to_string()))
                 .group(
                     ArgGroup::new("matcher")
                         .args(["match", "regex"])
@@ -740,7 +740,7 @@ fn terminal_command() -> Command {
                 .about(t!("cli.terminal_session_about").to_string())
                 .subcommand(
                     Command::new("control")
-                        .about("Control a terminal stream")
+                        .about(t!("cli.terminal_control_about").to_string())
                         .arg(required("target", "TARGET"))
                         .arg(flag("takeover"))
                         .arg(option("cols", "N"))
@@ -1034,6 +1034,7 @@ fn path_arg(name: &'static str, value_name: &'static str) -> Arg {
 #[cfg(test)]
 mod tests {
     use clap::{Arg, Command};
+    use rust_i18n::t;
 
     fn command_path<'a>(cmd: &'a Command, path: &[&str]) -> &'a Command {
         let mut current = cmd;

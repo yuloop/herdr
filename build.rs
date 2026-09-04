@@ -65,13 +65,8 @@ fn main() {
         .to_string();
 
     let zig = env::var("ZIG").unwrap_or_else(|_| "zig".into());
-    let mut command = Command::new(zig);
+    let mut command = Command::new(&zig);
     if cfg!(windows) {
-        // Zig 0.15.2's Run step cannot relativize generated executables across
-        // Windows drive letters, regardless of the compilation target. Keep
-        // both caches beside the vendored build so a tool installed on C: can
-        // build a checkout on D: (or elsewhere) without patching the Zig
-        // installation.
         let cache_dir = vendored_dir.join(".zig-cache");
         if env::var_os("ZIG_GLOBAL_CACHE_DIR").is_none() {
             command.env("ZIG_GLOBAL_CACHE_DIR", &cache_dir);
@@ -95,7 +90,18 @@ fn main() {
     let status = command
         .current_dir(&vendored_dir)
         .status()
-        .expect("failed to execute zig build for vendored libghostty-vt");
+        .unwrap_or_else(|err| {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                panic!(
+                    "zig executable not found (looked for {zig:?}; set the ZIG \
+                     environment variable to point at the zig binary). Building \
+                     the vendored libghostty-vt requires Zig 0.15.2: on macOS run \
+                     `brew install zig@0.15`, elsewhere install it from \
+                     https://ziglang.org/download/, then retry the build"
+                );
+            }
+            panic!("failed to execute zig build for vendored libghostty-vt: {err}");
+        });
     assert!(
         status.success(),
         "zig build for vendored libghostty-vt failed: {status}"

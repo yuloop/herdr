@@ -6,8 +6,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$installerPath = (Resolve-Path -LiteralPath "$PSScriptRoot\..\website\install.ps1").Path
-$bootstrapPath = (Resolve-Path -LiteralPath "$PSScriptRoot\..\website\install.cmd").Path
+$installerPath = (Resolve-Path -LiteralPath "$PSScriptRoot\..\distribution\install.ps1").Path
+$bootstrapPath = (Resolve-Path -LiteralPath "$PSScriptRoot\..\distribution\install.cmd").Path
 $bootstrapContent = Get-Content -LiteralPath $bootstrapPath -Raw
 foreach ($forbiddenCommand in @("Invoke-RestMethod", "Invoke-WebRequest", "Invoke-Expression", "iex")) {
     if ($bootstrapContent -match "(?i)\b$forbiddenCommand\b") {
@@ -27,7 +27,20 @@ $installerAst = [System.Management.Automation.Language.Parser]::ParseFile(
 if ($parseErrors.Count -ne 0) {
     throw ($parseErrors | Out-String)
 }
-foreach ($functionName in @("Prepend-PathEntry", "Update-PathRegistryEntry", "Publish-EnvironmentChange")) {
+$forbiddenPowerShellCommands = @(
+    $installerAst.FindAll(
+        { param($node) $node -is [System.Management.Automation.Language.CommandAst] },
+        $true
+    ) |
+        ForEach-Object { $_.GetCommandName() } |
+        Where-Object {
+            $_ -in @("Invoke-RestMethod", "Invoke-WebRequest", "Invoke-Expression", "irm", "iwr", "iex")
+        }
+)
+if ($forbiddenPowerShellCommands.Count -ne 0) {
+    throw "installer uses forbidden PowerShell network execution: $($forbiddenPowerShellCommands -join ', ')"
+}
+foreach ($functionName in @("Prepend-PathEntry", "Update-PathRegistryEntry")) {
     $definition = $installerAst.FindAll(
         {
             param($node)
@@ -77,22 +90,6 @@ try {
     $testEnvironmentKey.Dispose()
     [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($testRegistryPath, $false)
     [Environment]::SetEnvironmentVariable($pathTestVariable, $oldPathTestVariable, "Process")
-}
-
-$oldProcessPath = [Environment]::GetEnvironmentVariable("Path", "Process")
-$userEnvironmentKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment", $false)
-if ($null -eq $userEnvironmentKey) {
-    throw "unable to open the user environment registry key"
-}
-try {
-    $oldUserPathExists = @($userEnvironmentKey.GetValueNames()) -contains "Path"
-    if ($oldUserPathExists) {
-        $options = [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
-        $oldUserPath = $userEnvironmentKey.GetValue("Path", $null, $options)
-        $oldUserPathKind = $userEnvironmentKey.GetValueKind("Path")
-    }
-} finally {
-    $userEnvironmentKey.Dispose()
 }
 
 $archive = (Resolve-Path -LiteralPath $ArchivePath).Path
@@ -239,8 +236,6 @@ try {
 
     $required = @(
         "herdr.exe",
-        "assets\herdr.png",
-        "install-terminal-profile.ps1",
         "conpty\herdr-conpty.json",
         "conpty\conpty.dll",
         "conpty\x64\OpenConsole.exe",
@@ -254,35 +249,8 @@ try {
         }
     }
 
-    $terminalSettingsPath = Join-Path $root "terminal-settings.json"
-    @'
-{
-  "profiles": {
-    "defaults": {},
-    "list": []
-  }
-}
-'@ | Set-Content -LiteralPath $terminalSettingsPath -Encoding UTF8
-    & (Join-Path $installDir "install-terminal-profile.ps1") `
-        -StartingDirectory $root `
-        -SettingsPath $terminalSettingsPath `
-        -Elevate `
-        -SetDefault | Out-Null
-    $terminalSettings = Get-Content -LiteralPath $terminalSettingsPath -Raw | ConvertFrom-Json
-    $terminalProfile = @($terminalSettings.profiles.list | Where-Object { $_.name -eq "Herdr" })
-    if ($terminalProfile.Count -ne 1) {
-        throw "packaged terminal profile installer did not create exactly one Herdr profile"
-    }
-    $expectedTerminalCommand = '"' + (Resolve-Path -LiteralPath (Join-Path $installDir "herdr.exe")).Path + '"'
-    if ($terminalProfile[0].commandline -cne $expectedTerminalCommand) {
-        throw "packaged terminal profile installer resolved an unexpected Herdr path"
-    }
-    $expectedTerminalIcon = (Resolve-Path -LiteralPath (Join-Path $installDir "assets\herdr.png")).Path
-    if ($terminalProfile[0].icon -cne $expectedTerminalIcon) {
-        throw "packaged terminal profile installer resolved an unexpected icon path"
-    }
-
-    $releaseDir = Get-ChildItem -LiteralPath (Join-Path $herdrHome "packages\standalone\releases") -Directory |
+    $releasesDir = Join-Path $herdrHome "packages\standalone\releases"
+    $releaseDir = Get-ChildItem -LiteralPath $releasesDir -Directory |
         Where-Object { -not $_.Name.StartsWith(".staging.") } |
         Select-Object -First 1
     if ($null -eq $releaseDir) {
@@ -295,7 +263,7 @@ try {
     $badManifest | ConvertTo-Json -Depth 5 | Out-File -LiteralPath $previewManifestPath -Encoding utf8
     $downloadFailed = $false
     try {
-        & "$PSScriptRoot\..\website\install.ps1" `
+        & "$PSScriptRoot\..\distribution\install.ps1" `
             -Channel preview `
             -ManifestUrl $previewManifestUrl `
             -InstallDir $installDir `
@@ -421,7 +389,7 @@ try {
         }
     }
 
-    & "$PSScriptRoot\..\website\install.ps1" `
+    & "$PSScriptRoot\..\distribution\install.ps1" `
         -Channel preview `
         -ManifestUrl $previewManifestUrl `
         -InstallDir $installDir `
@@ -434,7 +402,7 @@ try {
     $junctionTarget = Join-Path $root "junction-target"
     Move-Item -LiteralPath $x64HostDir -Destination $junctionTarget
     New-Item -ItemType Junction -Path $x64HostDir -Target $junctionTarget | Out-Null
-    & "$PSScriptRoot\..\website\install.ps1" `
+    & "$PSScriptRoot\..\distribution\install.ps1" `
         -Channel preview `
         -ManifestUrl $previewManifestUrl `
         -InstallDir $installDir `
@@ -446,7 +414,7 @@ try {
 
     $rejected = $false
     try {
-        & "$PSScriptRoot\..\website\install.ps1" `
+        & "$PSScriptRoot\..\distribution\install.ps1" `
             -Channel preview `
             -ManifestUrl $previewManifestUrl `
             -InstallDir $installDir `
@@ -462,7 +430,7 @@ try {
     }
 
     $stableManifest | Out-File -LiteralPath $stableManifestPath -Encoding utf8
-    & "$PSScriptRoot\..\website\install.ps1" `
+    & "$PSScriptRoot\..\distribution\install.ps1" `
         -Channel stable `
         -ManifestUrl $stableManifestUrl `
         -InstallDir $installDir
@@ -497,7 +465,7 @@ exit /b 1
     $preserveBin = Join-Path $root "preserve-bin"
     $env:HERDR_HOME = $preserveHome
     $env:Path = "$fakeBin;$oldProcessPath"
-    & "$PSScriptRoot\..\website\install.ps1" `
+    & "$PSScriptRoot\..\distribution\install.ps1" `
         -ManifestUrl "http://127.0.0.1:$port/candidate.json" `
         -InstallDir $preserveBin `
         -ExpectedBuildId "installer-test"
@@ -508,7 +476,7 @@ exit /b 1
         throw "installer did not preserve the existing preview channel"
     }
 
-    & "$PSScriptRoot\..\website\install.ps1" `
+    & "$PSScriptRoot\..\distribution\install.ps1" `
         -Channel stable `
         -ManifestUrl $stableManifestUrl `
         -InstallDir $preserveBin
@@ -519,27 +487,11 @@ exit /b 1
         throw "explicit stable channel did not override the existing preview channel"
     }
 } finally {
-    try {
-        $env:HERDR_HOME = $oldHerdrHome
-        if ($null -ne $server -and -not $server.HasExited) {
-            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
-        }
-        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
-    } finally {
-        [Environment]::SetEnvironmentVariable("Path", $oldProcessPath, "Process")
-        $userEnvironmentKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment", $true)
-        if ($null -eq $userEnvironmentKey) {
-            throw "unable to restore the user environment registry key"
-        }
-        try {
-            if ($oldUserPathExists) {
-                $userEnvironmentKey.SetValue("Path", $oldUserPath, $oldUserPathKind)
-            } else {
-                $userEnvironmentKey.DeleteValue("Path", $false)
-            }
-        } finally {
-            $userEnvironmentKey.Dispose()
-        }
-        Publish-EnvironmentChange
+    $env:HERDR_HOME = $oldHerdrHome
+    $env:HERDR_INSTALLER_URL = $oldInstallerUrl
+    $env:Path = $oldProcessPath
+    if ($null -ne $server -and -not $server.HasExited) {
+        Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
     }
+    Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }

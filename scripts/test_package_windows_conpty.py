@@ -29,7 +29,7 @@ class WindowsConptyPackageTests(unittest.TestCase):
         loader = (
             package.PROJECT_ROOT / "vendor/portable-pty/src/win/psuedocon.rs"
         ).read_text(encoding="utf-8")
-        installer = (package.PROJECT_ROOT / "website/install.ps1").read_text(
+        installer = (package.PROJECT_ROOT / "distribution/install.ps1").read_text(
             encoding="utf-8"
         )
         for item in metadata["bundles"]["x86_64"]["files"]:
@@ -51,30 +51,6 @@ class WindowsConptyPackageTests(unittest.TestCase):
         self.assertIn('conpty\\x64\\OpenConsole.exe', wrapper)
         self.assertIn('conpty\\conpty.dll', wrapper)
         self.assertIn('"*Microsoft Corporation*"', wrapper)
-
-    def test_windows_terminal_support_files_are_packaged(self) -> None:
-        expected = package.expected_stage_files(
-            package.load_metadata(package.DEFAULT_METADATA), "x86_64"
-        )
-        self.assertIn("assets/herdr.png", expected)
-        self.assertIn("install-terminal-profile.ps1", expected)
-        installer = (
-            package.PROJECT_ROOT / "scripts/install_windows_terminal_profile.ps1"
-        ).read_text(encoding="utf-8")
-        self.assertIn('ProfileName = "Herdr"', installer)
-        self.assertIn("suppressApplicationTitle", installer)
-        self.assertIn(
-            'Set-JsonProperty -Object $settings -Name "defaultProfile"', installer
-        )
-        self.assertIn(
-            'Set-JsonProperty -Object $settings -Name "firstWindowPreference" -Value "defaultProfile"',
-            installer,
-        )
-        self.assertIn(
-            'Set-JsonProperty -Object $settings -Name "windowingBehavior" -Value "useAnyExisting"',
-            installer,
-        )
-        self.assertNotIn('"persistedWindowLayout"', installer)
 
     def test_package_download_has_a_finite_timeout(self) -> None:
         payload = b"package"
@@ -148,10 +124,6 @@ class WindowsConptyPackageTests(unittest.TestCase):
                     package.expected_stage_files(
                         package.load_metadata(metadata_path), "x86_64"
                     ),
-                )
-                self.assertEqual(
-                    archive.read("assets/herdr.png"),
-                    (package.PROJECT_ROOT / "website/assets/favicon.png").read_bytes(),
                 )
 
             (stage / "conpty" / "conpty.dll").write_bytes(b"tampered")

@@ -80,6 +80,19 @@ Examples:
 - Sidebar layout, token placement, colors, selection, modals, mouse/viewport state: TUI/client.
 - Workspace/tab/pane remain shared session organization for now, but avoid making them mandatory identity for unrelated runtime features.
 
+### Stable client endpoint contract
+
+The client-owned TUI endpoint generation is independent from the private same-install protocol. Generation 1 is the compatibility floor for Local, SSH, and Cloud connections and must remain available unless retired for a security reason.
+
+- Named core codecs are immutable. Do not add, remove, reorder, or reinterpret fields or enum variants reachable from a published codec. Introduce a new codec name and keep the old codec as a fallback instead.
+- Keep baseline JSON handshake and snapshot fields required. New JSON fields must be optional or have field-specific defaults; new enum values need an `Unknown` fallback where older clients can safely ignore them.
+- Add server features through advertised API methods and optional snapshot data when possible. A missing optional feature must disable only that action, not reject the connection.
+- Do not change the meaning or load-bearing parameter shape of an advertised endpoint method. If an old server could ignore a new field and incorrectly report success, add a new method name or a separately advertised capability and omit that field without it.
+- Missing methods, rejections, timeouts, and unavailable servers are client-local outcomes. They must not disconnect other compatible servers, and typing in a pane must not dismiss their notices.
+- Frozen endpoint fixtures, bincode digests, wire-tag tests, and `tests/fixtures/endpoint-method-shapes-v1.json` are compatibility contracts. Never update a generation-1 expectation merely to bless a wire change; create and negotiate a new codec or method.
+- Stable and preview update manifests advertise `endpoint_generation`. Keep release tooling aligned so an older updater knows when a new server generation really requires replacement.
+- Existing-value digests cannot detect an appended enum variant. Review every enum reachable from a frozen codec as append-closed even when tests remain green.
+
 ## Maintainer Workflow
 
 This section applies only to verified maintainers as defined under Scope and
@@ -169,30 +182,13 @@ After validation, leave `C:\work\repo` clean. Remove temporary files and delete
 Rustup caches. Unless Can explicitly asks to keep the patched tree for more
 manual testing, reset `C:\work\repo` back to a clean checkout before finishing.
 
-## Local Windows Deployment
-
-This checkout's locally built Chinese Windows release is deployed to
-`D:\WSL\Program Files\herdr-windows-x86_64-zh`.
-
-When redeploying to that directory, preserve only the existing configuration.
-Replace or remove the previous binaries and other runtime files, and do not
-create a backup directory, archive, or copy of the old deployment. Resolve and
-verify the exact deployment path before removing or replacing anything.
-
-Use `F:\xiangmudata_sync\claude` as the default Windows working directory. After
-each local Windows deployment, run the packaged `install-terminal-profile.ps1`
-with that starting directory, `-SetDefault`, and `-Elevate`. The resulting
-`Herdr` Windows Terminal profile must point at the deployed executable and icon,
-remain elevated by default, set Terminal's `windowingBehavior` to
-`useAnyExisting` so new instances reuse the current window across virtual
-desktops, and be the Terminal default profile without removing other profiles.
-Use `-NoElevate` only when the user explicitly opts out of administrator rights.
-
 ## Agent Detection Updates
 
 Agent detection changes should use the manifest hot-reload loop. Use the project-local `herdr-throwaway-repro` skill to create a disposable named session and drive the real agent UI through Herdr's CLI/API into the target state. Read the pane with `herdr agent read <pane> --source detection --format text` and inspect matching with `herdr agent explain <pane> --json`. Update the bundled manifest in `src/detect/manifests/<agent>.toml`, copy that manifest to the local override path at `~/.config/herdr/agent-detection/<agent>.toml`, then run `herdr server reload-agent-manifests` against the session under test. Before writing the override, check whether one already exists; never overwrite or remove a pre-existing override without alignment. Once the rule is correct, remove the temporary override or restore the previous one exactly so the committed bundled manifest remains the source of truth.
 
 Do not add large agent-specific full-screen fixture suites for routine manifest tuning. Keep Rust tests focused on manifest parsing, rule semantics, skip-state semantics, source precedence, cache reload behavior, and update flow. Use live pane reads for agent-specific screen evidence.
+
+`distribution/agent-detection/` is the remotely published catalog for released clients. Keep changes for already released agents aligned with their bundled manifests unless the validator records an exact compatibility exception. A newly bundled agent that current stable clients cannot identify may remain unpublished behind an exact version-and-digest exception, but it must be added to the catalog and the exception removed before the first stable release that ships it. `just release-docs-check` enforces that no unpublished exceptions remain.
 
 ## Vendored libghostty-vt
 
@@ -210,15 +206,15 @@ When updating libghostty-vt, check every active patch in `vendor/libghostty-vt.p
 
 Unreleased docs live in `docs/next/website/src/content/docs/`. Update those when a user-facing change needs docs before the next release. They are committed drafts but are never production website input. `docs/next/README.md` stages root README changes. `docs/next/CHANGELOG.md` is curated during stable release preparation, not maintained by normal feature and fix work.
 
-The active preview release docs live in `docs/preview/website/`. Preview CI owns this mutable snapshot and commits it atomically with `website/preview.json`; never edit it manually. Validate it with `node website/scripts/docs-preview.mjs check`.
+The active preview release docs live in `docs/preview/website/`. Preview CI owns this mutable snapshot and commits it atomically with `distribution/preview.json`; never edit it manually. Validate it with `node scripts/docs/preview.mjs check`.
 
-Published stable-release documentation lives in `docs/versions/`. Release CI seeds each version from the tagged `docs/next` tree, and maintainers may correct factual documentation errors in a published version afterward. Apply a correction separately to `docs/next` when it also applies to future releases; never replace a published tree with the current draft. The website build generates `/docs/preview/` from the active preview snapshot, `/docs/<version>/` from the maintained version directories, and `/docs/` from the version selected by `docs/versions/manifest.json`. Do not edit generated files under `website/src/content/docs/`.
+Published stable-release documentation lives in `docs/versions/`. Release CI seeds each version from the tagged `docs/next` tree, and maintainers may correct factual documentation errors in a published version afterward. Apply a correction separately to `docs/next` when it also applies to future releases; never replace a published tree with the current draft. The private website renders `/docs/preview/` from the active preview snapshot, `/docs/<version>/` from the maintained version directories, and `/docs/` from the version selected by `docs/versions/manifest.json`. Herdr remains the source of truth for the public snapshots.
 
-During release review, finalize `docs/next` and run `just release-docs-check`. Do not copy draft docs into preview or published versions manually. Preview CI snapshots the selected commit. After a stable GitHub Release succeeds, release CI seeds a new version from the exact tag, updates `latest.json`, and deploys them together.
+During release review, finalize `docs/next` and run `just release-docs-check`. Do not copy draft docs into preview or published versions manually. Preview CI snapshots the selected commit. After a stable GitHub Release succeeds, release CI seeds a new version from the exact tag and updates `distribution/latest.json`. The resulting master commit triggers the private website deployment.
 
 Normal feature and fix work must not edit `docs/next/CHANGELOG.md`; this keeps long-lived branches from conflicting over one shared release file. When refreshing an older pull request, remove its changelog-only diff. Keep user-facing commit subjects descriptive and include required `refs #<issue-number>` lines so stable release preparation can inventory the full range. During the pre-release audit, use that inventory to human-write and curate the user-facing entries in `docs/next/CHANGELOG.md`; generated commit lists are source material, not final release prose. Do not add changelog entries for website-only, documentation-only, CI, build-pipeline, or repository-maintenance changes.
 
-Normal feature/fix work should not edit root `README.md`, root `CHANGELOG.md`, published version docs, or `website/latest.json` unless it is a focused correction to already-published documentation or explicitly requested.
+Normal feature/fix work should not edit root `README.md`, root `CHANGELOG.md`, published version docs, or `distribution/latest.json` unless it is a focused correction to already-published documentation or explicitly requested.
 
 Put local PRDs, planning notes, and exploratory specs under `.local/prd/`; `.local/` is ignored and locally controlled.
 
@@ -255,7 +251,7 @@ guardrail.
 
 Herdr has one main branch and two update channels. Stable and preview both build from `master`; there is no long-lived preview branch.
 
-Normal users default to stable. Stable docs are `/docs/`, stable updates use `website/latest.json`, and Homebrew/Nix stay stable-only.
+Normal users default to stable. Stable docs are `/docs/`, stable updates use `distribution/latest.json`, and Homebrew/Nix stay stable-only.
 
 Preview is opt-in for direct Herdr installs:
 
@@ -271,7 +267,7 @@ herdr channel set stable
 herdr update
 ```
 
-Preview releases are GitHub prereleases produced by `.github/workflows/preview.yml` on manual dispatch and the Wednesday/Friday schedule. The workflow updates `website/preview.json`, which the website build publishes as `/preview.json`. Do not hand-edit `website/preview.json`; fix the workflow or `scripts/preview.py` and rerun Preview.
+Preview releases are GitHub prereleases produced by `.github/workflows/preview.yml` on manual dispatch and the Wednesday/Friday schedule. The workflow updates `distribution/preview.json`, which the private website publishes as `/preview.json`. Do not hand-edit `distribution/preview.json`; fix the workflow or `scripts/preview.py` and rerun Preview.
 
 Stable releases use:
 
@@ -280,7 +276,7 @@ just check
 just release 0.x.y
 ```
 
-Before stable release, run `/pre-release-audit`, finalize `docs/next`, and run `just pre-release-check` to validate the staged docs, website build, and render scaling. `just release` prepares the changelog and release commit, tags it, and pushes the tag. GitHub Actions builds binaries, creates the GitHub release, closes released issues, snapshots and promotes the tagged docs, and updates `website/latest.json`.
+Before stable release, run `/pre-release-audit`, finalize `docs/next`, and run `just pre-release-check` to validate the staged docs, distribution contract, and render scaling. `just release` prepares the changelog and release commit, tags it, and pushes the tag. GitHub Actions builds binaries, creates the GitHub release, closes released issues, snapshots and promotes the tagged docs, and updates `distribution/latest.json`. The private website repository owns rendering and deployment.
 
 Before the first stable Windows release, publish and verify a preview containing stable-channel support. Existing Windows preview users need that preview before `herdr channel set stable` can migrate them.
 

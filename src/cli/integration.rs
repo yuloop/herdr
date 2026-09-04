@@ -110,13 +110,13 @@ fn parse_integration_target(
 ) -> std::io::Result<Option<IntegrationTarget>> {
     let Some(target) = args.first().map(|arg| arg.as_str()) else {
         eprintln!(
-            "usage: herdr integration {action} <pi|omp|claude|codex|copilot|devin|droid|kimi|opencode|kilo|hermes|qwen|qodercli|cursor|mastracode|grok>"
+            "usage: herdr integration {action} <pi|omp|claude|codex|copilot|devin|droid|kimi|opencode|kilo|hermes|qodercli|qwen|cursor|mastracode|grok>"
         );
         return Ok(None);
     };
     if args.len() != 1 {
         eprintln!(
-            "usage: herdr integration {action} <pi|omp|claude|codex|copilot|devin|droid|kimi|opencode|kilo|hermes|qwen|qodercli|cursor|mastracode|grok>"
+            "usage: herdr integration {action} <pi|omp|claude|codex|copilot|devin|droid|kimi|opencode|kilo|hermes|qodercli|qwen|cursor|mastracode|grok>"
         );
         return Ok(None);
     }
@@ -133,7 +133,6 @@ fn parse_integration_target(
         "opencode" => IntegrationTarget::Opencode,
         "kilo" => IntegrationTarget::Kilo,
         "hermes" => IntegrationTarget::Hermes,
-        "qwen" => IntegrationTarget::Qwen,
         "qodercli" => IntegrationTarget::Qodercli,
         "qwen" => IntegrationTarget::Qwen,
         "cursor" => IntegrationTarget::Cursor,
@@ -143,7 +142,7 @@ fn parse_integration_target(
         _ => {
             eprintln!("unknown integration target: {target}");
             eprintln!(
-                "currently supported: pi, omp, claude, codex, copilot, devin, droid, kimi, opencode, kilo, hermes, qwen, qodercli, cursor, mastracode, antigravity-cli, grok"
+                "currently supported: pi, omp, claude, codex, copilot, devin, droid, kimi, opencode, kilo, hermes, qodercli, qwen, cursor, mastracode, antigravity-cli, grok"
             );
             return Ok(None);
         }
@@ -165,7 +164,6 @@ fn print_integration_help() {
     eprintln!("  herdr integration install opencode");
     eprintln!("  herdr integration install kilo");
     eprintln!("  herdr integration install hermes");
-    eprintln!("  herdr integration install qwen");
     eprintln!("  herdr integration install qodercli");
     eprintln!("  herdr integration install qwen");
     eprintln!("  herdr integration install cursor");
@@ -183,7 +181,6 @@ fn print_integration_help() {
     eprintln!("  herdr integration uninstall opencode");
     eprintln!("  herdr integration uninstall kilo");
     eprintln!("  herdr integration uninstall hermes");
-    eprintln!("  herdr integration uninstall qwen");
     eprintln!("  herdr integration uninstall qodercli");
     eprintln!("  herdr integration uninstall qwen");
     eprintln!("  herdr integration uninstall cursor");

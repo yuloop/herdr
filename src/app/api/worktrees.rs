@@ -638,14 +638,6 @@ impl App {
         });
     }
 
-    #[cfg(test)]
-    pub(crate) fn emit_worktree_opened_for_workspace(&mut self, ws_idx: usize, already_open: bool) {
-        let Some(worktree) = self.worktree_info_for_workspace(ws_idx) else {
-            return;
-        };
-        self.emit_worktree_opened_event(ws_idx, worktree, already_open);
-    }
-
     fn emit_worktree_opened_event(
         &mut self,
         ws_idx: usize,
@@ -802,7 +794,13 @@ mod tests {
 
     fn test_app_with_event_hub(event_hub: crate::api::EventHub) -> App {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        App::new(&Config::default(), true, None, api_rx, event_hub)
+        App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        )
     }
 
     #[cfg(windows)]
@@ -936,6 +934,7 @@ mod tests {
         assert_eq!(tab.workspace_id, workspace.workspace_id);
         assert_eq!(root_pane.workspace_id, workspace.workspace_id);
         assert_eq!(worktree.branch.as_deref(), Some("worktree/api-create"));
+        assert!(Path::new(&worktree.path).starts_with(&worktree_root));
         assert!(Path::new(&worktree.path).join("README.md").exists());
         assert_eq!(app.state.workspaces.len(), 2);
         assert!(
@@ -2233,6 +2232,112 @@ mod tests {
         let _ = std::fs::remove_dir_all(repo);
     }
 
+    #[tokio::test]
+    async fn failed_worktree_remove_preserves_and_restores_shutdown_pane() {
+        let checkout = unique_temp_path("api-worktree-remove-failure-checkout");
+        std::fs::create_dir_all(&checkout).unwrap();
+        let mut app = test_app();
+        app.state.default_shell = test_shell().into();
+        let mut workspace = Workspace::test_new("worktree");
+        workspace.identity_cwd = checkout.clone();
+        workspace.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            key: "repo-key".into(),
+            label: "repo".into(),
+            repo_root: checkout.clone(),
+            checkout_path: checkout.clone(),
+            is_linked_worktree: true,
+        });
+        let workspace_id = workspace.id.clone();
+        let pane_id = workspace.tabs[0].root_pane;
+        let terminal_id = workspace.terminal_id(pane_id).cloned().unwrap();
+        let foreground = Workspace::test_new("foreground");
+        let foreground_id = foreground.id.clone();
+        app.state.workspaces = vec![workspace, foreground];
+        app.state.active = Some(1);
+        app.state.selected = 1;
+        app.state.ensure_test_terminals();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(
+                Some(crate::detect::Agent::Codex),
+                crate::detect::AgentState::Working,
+            );
+        app.state.toast_config.delay_seconds = 1;
+        app.handle_internal_event(AppEvent::StateChanged {
+            pane_id,
+            agent: Some(crate::detect::Agent::Codex),
+            state: crate::detect::AgentState::Blocked,
+            visible_blocker: true,
+            visible_working: false,
+            process_exited: false,
+            observed_at: std::time::Instant::now(),
+        });
+        assert!(app.state.pending_agent_notifications.contains_key(&pane_id));
+        let (runtime, _input_rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        app.terminal_runtimes.insert(terminal_id.clone(), runtime);
+
+        let shutdown_panes = app.shutdown_workspace_terminal_runtimes_for_worktree_remove(0);
+        assert_eq!(shutdown_panes, vec![pane_id]);
+
+        let checkout_key = crate::worktree::canonical_or_original(&checkout);
+        app.pending_api_worktree_removes
+            .insert(workspace_id.clone(), 7);
+        app.pending_api_worktree_remove_paths
+            .insert(checkout_key.clone(), 7);
+        let workspace_snapshot = app.workspace_info(0);
+        let worktree_snapshot = app
+            .worktree_info_for_membership(app.state.workspaces[0].worktree_space().unwrap(), None);
+        let (respond_to, response_rx) = response_channel();
+        let pane_updates = app.handle_api_worktree_remove_finished(WorktreeRemoveResult {
+            workspace_id,
+            path: checkout.clone(),
+            workspace: Some(Box::new(workspace_snapshot)),
+            worktree: Some(Box::new(worktree_snapshot)),
+            forced: false,
+            api_request: Some(ApiWorktreeRemoveRequest {
+                id: "req".into(),
+                operation_id: 7,
+                checkout_key,
+                shutdown_panes,
+                respond_to,
+            }),
+            result: Err("simulated remove failure".into()),
+        });
+        assert!(pane_updates.is_empty());
+
+        let response = response_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        let error: ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(error.error.code, "worktree_remove_failed");
+        assert!(app.find_pane(pane_id).is_some());
+        assert!(app.terminal_runtimes.get(&terminal_id).is_none());
+        assert!(app
+            .pending_worktree_remove_runtime_restores
+            .contains_key(&pane_id));
+
+        let pane_updates =
+            app.handle_internal_event_with_pane_updates(AppEvent::PaneDied { pane_id });
+        assert!(matches!(
+            pane_updates.as_slice(),
+            [update] if update.agent_released && update.suppress_completion
+        ));
+        assert!(app.pending_worktree_remove_runtime_exits.is_empty());
+        assert!(app.pending_worktree_remove_runtime_restores.is_empty());
+        assert!(app.state.pending_agent_notifications.is_empty());
+        assert!(app.terminal_runtimes.get(&terminal_id).is_some());
+        assert_eq!(
+            app.state.active.map(|idx| &app.state.workspaces[idx].id),
+            Some(&foreground_id)
+        );
+        assert_eq!(app.state.workspaces[app.state.selected].id, foreground_id);
+
+        crate::app::api::test_support::shutdown_test_runtimes(&mut app);
+        let _ = std::fs::remove_dir_all(checkout);
+    }
+
     #[test]
     fn deferred_api_background_worktree_remove_preserves_focused_workspace() {
         let mut app = test_app();
@@ -2254,10 +2359,15 @@ mod tests {
         child.worktree_space = Some(membership.clone());
         let foreground = Workspace::test_new("foreground");
         let child_id = child.id.clone();
+        let child_pane_id = child.tabs[0].root_pane;
         let foreground_id = foreground.id.clone();
         app.state.workspaces = vec![parent, child, foreground];
         app.state.active = Some(2);
         app.state.selected = 2;
+        app.pending_worktree_remove_runtime_exits
+            .insert(child_pane_id, 1);
+        app.pending_worktree_remove_runtime_restores
+            .insert(child_pane_id, 7);
         let workspace_snapshot = app.workspace_info(1);
         let worktree_snapshot = app.worktree_info_for_membership(&membership, None);
         app.pending_api_worktree_removes.insert(child_id.clone(), 7);
@@ -2265,7 +2375,7 @@ mod tests {
             .insert(crate::worktree::canonical_or_original(&checkout), 7);
         let (respond_to, response_rx) = response_channel();
 
-        app.handle_api_worktree_remove_finished(WorktreeRemoveResult {
+        let _ = app.handle_api_worktree_remove_finished(WorktreeRemoveResult {
             workspace_id: child_id,
             path: checkout.clone(),
             workspace: Some(Box::new(workspace_snapshot)),
@@ -2275,6 +2385,7 @@ mod tests {
                 id: "req".into(),
                 operation_id: 7,
                 checkout_key: crate::worktree::canonical_or_original(&checkout),
+                shutdown_panes: vec![child_pane_id],
                 respond_to,
             }),
             result: Ok(()),
@@ -2294,10 +2405,12 @@ mod tests {
             Some(&foreground_id)
         );
         assert_eq!(app.state.workspaces[app.state.selected].id, foreground_id);
+        assert!(app.pending_worktree_remove_runtime_exits.is_empty());
+        assert!(app.pending_worktree_remove_runtime_restores.is_empty());
     }
 
-    #[test]
-    fn deferred_api_worktree_remove_emits_removed_after_workspace_changes() {
+    #[tokio::test]
+    async fn deferred_api_worktree_remove_emits_removed_after_workspace_changes() {
         let event_hub = crate::api::EventHub::default();
         let mut app = test_app_with_event_hub(event_hub.clone());
         let checkout = PathBuf::from("/repo/herdr-issue");
@@ -2310,13 +2423,19 @@ mod tests {
             is_linked_worktree: true,
         });
         let child_id = child.id.clone();
+        let child_pane_id = child.tabs[0].root_pane;
+        let child_terminal_id = child.terminal_id(child_pane_id).cloned().unwrap();
         app.state.workspaces.push(child);
+        app.state.ensure_test_terminals();
+        app.state.terminals.get_mut(&child_terminal_id).unwrap().cwd = checkout.clone();
         let workspace_snapshot = app.workspace_info(0);
         let worktree_snapshot = app
             .worktree_info_for_membership(app.state.workspaces[0].worktree_space().unwrap(), None);
         app.pending_api_worktree_removes.insert(child_id.clone(), 7);
         app.pending_api_worktree_remove_paths
             .insert(crate::worktree::canonical_or_original(&checkout), 7);
+        app.pending_worktree_remove_runtime_exits
+            .insert(child_pane_id, 1);
         app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
             key: "repo-key".into(),
             label: "herdr".into(),
@@ -2326,7 +2445,7 @@ mod tests {
         });
         let (respond_to, response_rx) = response_channel();
 
-        app.handle_api_worktree_remove_finished(WorktreeRemoveResult {
+        let _ = app.handle_api_worktree_remove_finished(WorktreeRemoveResult {
             workspace_id: child_id,
             path: checkout.clone(),
             workspace: Some(Box::new(workspace_snapshot)),
@@ -2336,6 +2455,7 @@ mod tests {
                 id: "req".into(),
                 operation_id: 7,
                 checkout_key: crate::worktree::canonical_or_original(&checkout),
+                shutdown_panes: vec![child_pane_id],
                 respond_to,
             }),
             result: Ok(()),
@@ -2363,6 +2483,10 @@ mod tests {
                 .worktree_space()
                 .map(|membership| membership.checkout_path.as_path()),
             Some(Path::new("/repo/other"))
+        );
+        assert_eq!(
+            app.state.terminals[&child_terminal_id].cwd,
+            PathBuf::from("/repo/other")
         );
     }
 }

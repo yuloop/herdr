@@ -101,7 +101,7 @@ herdr pane read w1:p2 --source recent --lines 50
 | タブ | `tab.create`、`tab.list`、`tab.get`、`tab.focus`、`tab.rename`、`tab.move`、`tab.close` |
 | ペイン | `pane.split`、`pane.swap`、`pane.move`、`pane.zoom`、`pane.layout`、`pane.process_info`、`pane.neighbor`、`pane.edges`、`pane.focus_direction`、`pane.resize`、`pane.list`、`pane.current`、`pane.get`、`pane.rename`、`pane.send_text`、`pane.send_keys`、`pane.send_input`、`pane.read`、`pane.graphics.info`、`pane.graphics.set`、`pane.graphics.clear`、`pane.graphics.stream`、`pane.report_agent`、`pane.report_agent_session`、`pane.report_metadata`、`pane.clear_agent_authority`、`pane.release_agent`、`pane.close`、`pane.wait_for_output` |
 | ポップアップ | `popup.close` |
-| レイアウト | `layout.export`、`layout.apply`、`layout.set_split_ratio`、`layout.rearrange` |
+| レイアウト | `layout.export`、`layout.apply`、`layout.set_split_ratio` |
 | エージェント | `agent.list`、`agent.get`、`agent.read`、`agent.explain`、`agent.send_keys`、`agent.prompt`、`agent.wait`、`agent.rename`、`agent.focus`、`agent.start` |
 | イベント | `events.subscribe`、`events.wait` |
 | インテグレーション | `integration.install`、`integration.uninstall` |
@@ -210,15 +210,6 @@ CLI の `herdr api snapshot` は、クライアントやエージェントが簡
 ```json
 {"id":"req_ratio","method":"layout.set_split_ratio","params":{"tab_id":"w1:t1","path":[],"ratio":0.6}}
 ```
-
-`layout.rearrange` は、すでに実行中のペインの周囲にあるレイアウトツリーだけを再構築します。ペイン id、ターミナルの所有関係、プロセス状態、各ペインのスクロールバックは保持されます。再配置操作は `source_pane_id` を `target_pane_id` の隣へ移動します。`placement` は `left`、`right`、`up`、`down` のいずれかで、省略可能な `ratio` のデフォルトは `0.5` です。プリセット操作では `anchor_pane_id` が先頭またはメインになり、他のペインは現在の視覚順を保ちます。プリセットは `columns`、`rows`、`grid`、`main_left`、`main_top` です。
-
-```json
-{"id":"req_reposition","method":"layout.rearrange","params":{"operation":{"type":"reposition","source_pane_id":"w1:p3","target_pane_id":"w1:p1","placement":"left"},"focus":true}}
-{"id":"req_template","method":"layout.rearrange","params":{"operation":{"type":"preset","anchor_pane_id":"w1:p3","preset":"main_left"},"focus":true}}
-```
-
-移動元と移動先は同じズームされていないタブに属している必要があります。レスポンスは `type: "layout_rearrange"` で、`rearrange` の下に `changed`、任意の `reason`、アンカー/対象/フォーカスペイン id、更新済みレイアウトスナップショットを含みます。変更されない場合の reason は `same_pane`、`cross_tab`、`zoomed_tab`、`single_pane`、`unchanged` です。変更に成功すると `layout.updated` が発行されます。
 
 プロセスを起動するメソッドは `env` オブジェクトを受け付けます。Herdr はそのキー/値ペアを新しく起動されるプロセスにのみ適用します。Herdr は管理下のペインプロセスに `HERDR_SOCKET_PATH`、`HERDR_ENV=1`、`HERDR_WORKSPACE_ID`、`HERDR_TAB_ID`、`HERDR_PANE_ID` も注入します。呼び出し側が与えた環境変数と衝突した場合、Herdr 管理の変数が権威を持ちます。
 
@@ -758,6 +749,6 @@ herdr agent wait w1:p1 --until blocked
 
 ## プロトコルの安定性
 
-Herdr にはクライアント/サーバー互換性のためのプロトコルバージョンがあります。プロトコルの変更は、リリースの互換性を念頭にレビューされます。
+クライアント描画の Herdr UI は、ローカルサーバーと SSH サーバーに安定したエンドポイント世代を使います。クライアントとサーバーのビルドが一致する必要はありません。接続時にコアのスナップショット、画面、入力、blob コーデックを合意し、サーバーが対応 API メソッドを通知します。メソッドがない場合は、そのサーバー上の該当アクションだけを無効にしてクライアント側通知を表示します。拒否やタイムアウトも接続を終了せず通知します。エンドポイント世代 1 より前のサーバーだけは最後の 1 回の更新が必要です。
 
-新しい挙動に依存する前に、`ping` または `herdr status` でサーバーのプロトコルを確認してください。未知のフィールドは寛容に扱ってください。
+番号付きバイナリプロトコルは、直接ターミナル接続やライブハンドオフなど、同一インストール内の内部操作に残ります。異なるビルド間でそれらを使う前に `ping` または `herdr status` を確認してください。JSON API クライアントは未知のフィールドを無視し、未対応メソッドを通常のエラーとして扱う必要があります。

@@ -13,13 +13,50 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-mod client_window;
 mod clipboard_image;
 
-pub(crate) use client_window::{
-    current_process_has_standalone_console, restore_and_watch_client_window_state,
-    show_startup_error_dialog,
-};
+pub(super) fn read_terminal_grid_size() -> std::io::Result<(u16, u16)> {
+    crossterm::terminal::size()
+}
+
+pub(crate) fn replace_file(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let moved = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+pub(crate) fn set_default_plugin_pane_pwd(
+    _env: &mut Vec<(String, String)>,
+    _cwd: &std::path::Path,
+) {
+}
 
 use windows_sys::{
     Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation},
@@ -56,7 +93,6 @@ use windows_sys::{
                 MEMORY_BASIC_INFORMATION,
             },
             Ole::{CF_DIB, CF_DIBV5, CF_UNICODETEXT},
-            SystemInformation::GetSystemDirectoryW,
             Threading::{
                 GetCurrentProcess, GetExitCodeProcess, GetProcessTimes, OpenProcess, OpenThread,
                 QueryFullProcessImageNameW, ResumeThread, TerminateProcess, CREATE_NO_WINDOW,
@@ -103,32 +139,12 @@ const PROCESS_ENVIRONMENT_READ_CHUNK_BYTES: usize = 16 * 1024;
 const PROCESS_RUNTIME_MARKER_CACHE_CAPACITY: usize = 1_024;
 const PROCESS_RUNTIME_MARKER_CACHE_RETENTION: Duration = Duration::from_secs(60);
 const PROCESS_RUNTIME_MARKER_NEGATIVE_TTL: Duration = Duration::from_secs(1);
-const DEFAULT_PANE_SHELL_CANDIDATES: [&str; 3] = ["pwsh.exe", "powershell.exe", "cmd.exe"];
 
 static NEXT_PANE_RUNTIME_MARKER: AtomicU64 = AtomicU64::new(1);
 static PROCESS_RUNTIME_MARKER_CACHE: LazyLock<Mutex<HashMap<u32, CachedProcessRuntimeMarker>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static GIT_BASH_PROCESS_CACHE: LazyLock<Mutex<HashMap<u32, CachedGitBashProcess>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-
-pub(crate) fn default_windows_pane_shell() -> String {
-    select_default_windows_pane_shell(windows_executable_available)
-}
-
-fn select_default_windows_pane_shell(mut available: impl FnMut(&str) -> bool) -> String {
-    DEFAULT_PANE_SHELL_CANDIDATES
-        .iter()
-        .copied()
-        .find(|candidate| available(candidate))
-        .unwrap_or("cmd.exe")
-        .to_string()
-}
-
-fn windows_executable_available(executable: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|path| {
-        std::env::split_paths(&path).any(|directory| directory.join(executable).is_file())
-    })
-}
 
 pub(crate) fn remote_ssh_config_paths() -> super::RemoteSshConfigPaths {
     super::RemoteSshConfigPaths {
@@ -518,31 +534,10 @@ fn next_pane_runtime_marker() -> String {
     format!("{:x}-{timestamp:x}-{counter:x}", std::process::id())
 }
 
-pub(crate) fn system_command_processor() -> std::ffi::OsString {
-    use std::os::windows::ffi::OsStringExt as _;
-
-    // GetSystemDirectoryW is independent of inherited environment variables.
-    // Some terminal launchers repurpose ComSpec to point at themselves, which
-    // must not redirect batch files or recursively launch the terminal host.
-    let mut buffer = vec![0_u16; 260];
-    loop {
-        let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) };
-        if length == 0 {
-            break;
-        }
-        let length = length as usize;
-        if length < buffer.len() {
-            return PathBuf::from(std::ffi::OsString::from_wide(&buffer[..length]))
-                .join("cmd.exe")
-                .into_os_string();
-        }
-        if length > 32_768 {
-            break;
-        }
-        buffer.resize(length, 0);
-    }
-
-    r"C:\Windows\System32\cmd.exe".into()
+fn raw_command_shell(comspec: Option<std::ffi::OsString>) -> std::ffi::OsString {
+    comspec
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into())
 }
 
 pub(crate) fn interactive_shell_command(argv: &[String], shell_name: &str) -> Option<String> {
@@ -623,24 +618,174 @@ fn cmd_encoded_powershell_command(script: &str) -> String {
 }
 
 pub(crate) fn detached_custom_command_process_platform(command: &str) -> std::process::Command {
+    detached_custom_command_process_with_comspec(command, std::env::var_os("ComSpec"))
+}
+
+pub(crate) fn status_commands_supported() -> bool {
+    true
+}
+
+pub(crate) fn configure_status_command(process: &mut std::process::Command) {
     use std::os::windows::process::CommandExt;
 
-    let command_processor = system_command_processor();
-    let mut process = std::process::Command::new(&command_processor);
+    // The process must not run before it is assigned to the kill-on-close job.
+    process.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+}
+
+pub(crate) struct StatusCommandGuard {
+    job: usize,
+}
+
+impl StatusCommandGuard {
+    pub(crate) fn new(child: &tokio::process::Child) -> std::io::Result<Self> {
+        let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if job.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let limits_size = match u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()) {
+            Ok(size) => size,
+            Err(_) => {
+                unsafe {
+                    CloseHandle(job);
+                }
+                return Err(std::io::Error::other("job limits size exceeds u32"));
+            }
+        };
+        if unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                std::ptr::from_ref(&limits).cast(),
+                limits_size,
+            )
+        } == 0
+        {
+            let error = std::io::Error::last_os_error();
+            unsafe {
+                CloseHandle(job);
+            }
+            return Err(error);
+        }
+
+        let Some(process) = child.raw_handle() else {
+            unsafe {
+                CloseHandle(job);
+            }
+            return Err(std::io::Error::other(
+                "status command has no process handle",
+            ));
+        };
+        if unsafe { AssignProcessToJobObject(job, process.cast()) } == 0 {
+            let error = std::io::Error::last_os_error();
+            unsafe {
+                CloseHandle(job);
+            }
+            return Err(error);
+        }
+        if let Err(error) = resume_suspended_process(child.id()) {
+            unsafe {
+                CloseHandle(job);
+            }
+            return Err(error);
+        }
+
+        Ok(Self { job: job as usize })
+    }
+}
+
+fn resume_suspended_process(process_id: Option<u32>) -> std::io::Result<()> {
+    let process_id =
+        process_id.ok_or_else(|| std::io::Error::other("status command has no process id"))?;
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    let result = (|| {
+        let mut entry: THREADENTRY32 = unsafe { std::mem::zeroed() };
+        entry.dwSize = u32::try_from(size_of::<THREADENTRY32>())
+            .map_err(|_| std::io::Error::other("thread entry size exceeds u32"))?;
+        if unsafe { Thread32First(snapshot, &mut entry) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        loop {
+            if entry.th32OwnerProcessID == process_id {
+                let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+                if thread.is_null() {
+                    return Err(std::io::Error::last_os_error());
+                }
+                let resume_result = unsafe { ResumeThread(thread) };
+                let resume_error = (resume_result == u32::MAX).then(std::io::Error::last_os_error);
+                unsafe {
+                    CloseHandle(thread);
+                }
+                if let Some(error) = resume_error {
+                    return Err(error);
+                }
+                return Ok(());
+            }
+            if unsafe { Thread32Next(snapshot, &mut entry) } == 0 {
+                return Err(std::io::Error::other(
+                    "status command primary thread was not found",
+                ));
+            }
+        }
+    })();
+
+    unsafe {
+        CloseHandle(snapshot);
+    }
+    result
+}
+
+impl StatusCommandGuard {
+    pub(crate) fn terminate(&mut self) {
+        if self.job != 0 {
+            // KILL_ON_JOB_CLOSE terminates the shell and every descendant still in
+            // the job, including on task cancellation and config reload.
+            unsafe {
+                CloseHandle(self.job as HANDLE);
+            }
+            self.job = 0;
+        }
+    }
+}
+
+impl Drop for StatusCommandGuard {
+    fn drop(&mut self) {
+        self.terminate();
+    }
+}
+
+fn detached_custom_command_process_with_comspec(
+    command: &str,
+    comspec: Option<std::ffi::OsString>,
+) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+
+    let mut process = std::process::Command::new(raw_command_shell(comspec));
     process.arg("/d").arg("/c").raw_arg(command);
-    process.env("ComSpec", command_processor);
     process
 }
 
 pub(crate) fn pane_custom_command_pty_builder_platform(
     command: &str,
 ) -> portable_pty::CommandBuilder {
-    let command_processor = system_command_processor();
-    let mut builder = portable_pty::CommandBuilder::new(&command_processor);
+    pane_custom_command_pty_builder_with_comspec(command, std::env::var_os("ComSpec"))
+}
+
+fn pane_custom_command_pty_builder_with_comspec(
+    command: &str,
+    comspec: Option<std::ffi::OsString>,
+) -> portable_pty::CommandBuilder {
+    let mut builder = portable_pty::CommandBuilder::new(raw_command_shell(comspec));
     builder.arg("/d");
     builder.arg("/c");
     builder.raw_arg(command);
-    builder.env("ComSpec", command_processor);
     builder
 }
 
@@ -739,11 +884,6 @@ fn launch_server_daemon_with_wmi(command: &std::process::Command) -> std::io::Re
             "working directory",
         )?,
         process_startup_information: Win32_ProcessStartup {
-            // Win32_ProcessStartup only accepts the creation flags documented
-            // by the CIM provider; CREATE_NO_WINDOW is rejected with error 21.
-            // This process is created by the WMI provider rather than by the
-            // Terminal-hosted client, so DETACHED_PROCESS does not trigger a
-            // second Windows Terminal window here.
             create_flags: DETACHED_PROCESS,
             environment_variables: effective_command_environment(command)?,
         },
@@ -865,11 +1005,7 @@ fn current_job_kills_processes_on_close() -> std::io::Result<bool> {
 pub fn detach_server_daemon_command(command: &mut std::process::Command) {
     use std::os::windows::process::CommandExt;
 
-    // Do not use `DETACHED_PROCESS` here. With Windows Terminal configured as
-    // the system's default terminal, it may create another Terminal window for
-    // the daemon. `CREATE_NO_WINDOW` provides the required console isolation
-    // without asking a terminal host to service the child process.
-    command.creation_flags(CREATE_NO_WINDOW);
+    command.creation_flags(DETACHED_PROCESS);
 }
 
 pub fn current_process_is_detached_server_daemon() -> bool {
@@ -2437,30 +2573,6 @@ mod tests {
     };
 
     #[test]
-    fn default_windows_pane_shell_prefers_pwsh() {
-        assert_eq!(
-            super::select_default_windows_pane_shell(|_| true),
-            "pwsh.exe"
-        );
-    }
-
-    #[test]
-    fn default_windows_pane_shell_falls_back_to_windows_powershell() {
-        assert_eq!(
-            super::select_default_windows_pane_shell(|candidate| candidate == "powershell.exe"),
-            "powershell.exe"
-        );
-    }
-
-    #[test]
-    fn default_windows_pane_shell_falls_back_to_cmd() {
-        assert_eq!(
-            super::select_default_windows_pane_shell(|_| false),
-            "cmd.exe"
-        );
-    }
-
-    #[test]
     fn private_remote_directory_supports_long_paths() {
         let base = std::env::temp_dir().join(format!(
             "herdr-private-remote-dir-test-{}",
@@ -2478,27 +2590,27 @@ mod tests {
     #[test]
     fn windows_conpty_native_encoder_uses_canonical_phase_and_repeat_count() {
         let key = crate::input::TerminalKey::new(
-            crossterm::event::KeyCode::Esc,
-            crossterm::event::KeyModifiers::empty(),
+            crossterm::event::KeyCode::Char('7'),
+            crossterm::event::KeyModifiers::CONTROL,
         )
         .with_windows_record(crate::input::WindowsKeyRecord {
             key_down: true,
             repeat_count: 3,
-            virtual_key_code: 27,
-            virtual_scan_code: 1,
-            unicode: 27,
-            control_key_state: 0,
+            virtual_key_code: 0x37,
+            virtual_scan_code: 0x08,
+            unicode: 0,
+            control_key_state: 0x0008,
         });
 
         assert_eq!(
             super::encode_windows_conpty_fallback(&key),
-            Some(b"\x1b[27;1;27;1;0;3_".to_vec())
+            Some(b"\x1b[55;8;0;1;8;3_".to_vec())
         );
         let mut release = key.with_kind(crossterm::event::KeyEventKind::Release);
         release.repeat_count = 3;
         assert_eq!(
             super::encode_windows_conpty_fallback(&release),
-            Some(b"\x1b[27;1;27;0;0;1_".to_vec())
+            Some(b"\x1b[55;8;0;0;8;1_".to_vec())
         );
     }
 
@@ -2640,10 +2752,9 @@ mod tests {
         ];
         let inherited_path = std::env::var_os("PATH").unwrap_or_default();
         let path = format!("{};{}", base.display(), inherited_path.to_string_lossy());
-        let command_processor = super::system_command_processor();
         let run_command = |shell: &str, command: &str, capture: &std::path::Path| {
             let mut process = if shell == "cmd.exe" {
-                let mut process = Command::new(&command_processor);
+                let mut process = Command::new("cmd.exe");
                 process.args(["/d", "/c", command]);
                 process
             } else {
@@ -2653,7 +2764,6 @@ mod tests {
             };
             process
                 .env("PATH", &path)
-                .env("ComSpec", &command_processor)
                 .env("HERDR_ARGV_CAPTURE", capture)
                 .env("PSExecutionPolicyPreference", "Bypass")
                 .status()
@@ -2721,9 +2831,10 @@ mod tests {
             fs::write(
                 capture,
                 format!(
-                    "{}\n{}",
+                    "{}\n{}\n{}",
                     cwd.display(),
-                    super::current_process_is_detached_server_daemon()
+                    unsafe { GetConsoleWindow() }.is_null(),
+                    !super::current_job_kills_processes_on_close().expect("inspect WMI daemon job")
                 ),
             )
             .expect("write WMI daemon test capture");
@@ -2754,7 +2865,7 @@ mod tests {
             .expect("launch detached process through WMI");
         assert_ne!(pid, 0, "WMI returned an invalid process id");
 
-        let expected = format!("{}\ntrue", base.display());
+        let expected = format!("{}\ntrue\ntrue", base.display());
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             if fs::read_to_string(&capture).is_ok_and(|captured| captured == expected) {
@@ -2869,30 +2980,28 @@ mod tests {
 
     #[test]
     fn pane_custom_command_uses_cmd() {
-        let command_processor = super::system_command_processor();
-        let builder = super::pane_custom_command_pty_builder_platform("echo hello");
+        let builder = super::pane_custom_command_pty_builder_with_comspec(
+            "echo hello",
+            Some(r"C:\Windows\System32\cmd.exe".into()),
+        );
 
         assert_eq!(
             argv_strings(builder.get_argv()),
-            [
-                command_processor.to_string_lossy().into_owned(),
-                "/d".to_string(),
-                "/c".to_string()
-            ]
-        );
-        assert_eq!(
-            builder.get_env("ComSpec"),
-            Some(command_processor.as_os_str())
+            [r"C:\Windows\System32\cmd.exe", "/d", "/c"]
         );
     }
 
     #[test]
     fn detached_custom_command_uses_cmd() {
-        let command_processor = super::system_command_processor();
+        let expected_shell = std::env::var_os("ComSpec")
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into())
+            .to_string_lossy()
+            .into_owned();
 
         let process = super::detached_custom_command_process_platform("echo hello");
 
-        assert_eq!(process.get_program(), command_processor.as_os_str());
+        assert_eq!(process.get_program().to_string_lossy(), expected_shell);
         assert_eq!(
             process
                 .get_args()
@@ -2900,26 +3009,17 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["/d", "/c", "echo hello"]
         );
-        assert_eq!(
-            process
-                .get_envs()
-                .find(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case("ComSpec"))
-                .and_then(|(_, value)| value),
-            Some(command_processor.as_os_str())
-        );
     }
 
     #[test]
-    fn system_command_processor_is_a_real_cmd_executable() {
-        let command_processor = super::system_command_processor();
+    fn custom_command_falls_back_when_comspec_is_empty() {
+        let builder =
+            super::pane_custom_command_pty_builder_with_comspec("echo hello", Some("".into()));
 
         assert_eq!(
-            std::path::Path::new(&command_processor)
-                .file_name()
-                .and_then(std::ffi::OsStr::to_str),
-            Some("cmd.exe")
+            argv_strings(builder.get_argv()),
+            [r"C:\Windows\System32\cmd.exe", "/d", "/c"]
         );
-        assert!(std::path::Path::new(&command_processor).is_file());
     }
 
     #[test]
@@ -2946,7 +3046,9 @@ mod tests {
         let cwd = std::env::temp_dir().join(format!("herdr-cwd-test-{}", std::process::id()));
         fs::create_dir_all(&cwd).expect("create cwd fixture");
 
-        let mut child = Command::new(super::system_command_processor())
+        let shell =
+            std::env::var_os("ComSpec").unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into());
+        let mut child = Command::new(shell)
             .args(["/D", "/Q", "/C", "ping -n 11 127.0.0.1 > NUL"])
             .current_dir(&cwd)
             .stdin(Stdio::null())
@@ -2974,7 +3076,9 @@ mod tests {
 
     #[test]
     fn windows_process_environment_reads_runtime_marker() {
-        let mut child = Command::new(super::system_command_processor())
+        let shell =
+            std::env::var_os("ComSpec").unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into());
+        let mut child = Command::new(shell)
             .args(["/D", "/Q", "/C", "ping -n 11 127.0.0.1 > NUL"])
             .env(super::PANE_RUNTIME_MARKER_ENV_VAR, "pane-test")
             .stdin(Stdio::null())
@@ -3936,28 +4040,4 @@ mod tests {
             );
         }
     }
-}
-
-// --- status command stubs (no-op on Windows, no Unix PTY status line support) ---
-
-pub(crate) fn status_commands_supported() -> bool {
-    false
-}
-
-pub(crate) fn configure_status_command(_process: &mut std::process::Command) {}
-
-pub(crate) struct StatusCommandGuard;
-
-impl StatusCommandGuard {
-    pub(crate) fn new(_child: &tokio::process::Child) -> std::io::Result<Self> {
-        Ok(Self)
-    }
-
-    pub(crate) fn terminate(&mut self) {}
-}
-
-pub(crate) fn set_default_plugin_pane_pwd(
-    _env: &mut Vec<(String, String)>,
-    _cwd: &std::path::Path,
-) {
 }

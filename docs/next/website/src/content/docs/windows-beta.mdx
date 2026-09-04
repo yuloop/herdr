@@ -109,7 +109,7 @@ Windows packages include Microsoft's current app-local ConPTY runtime because th
 
 ## Copy and paste
 
-Herdr's pane text copy works on Windows beta. Drag-select text inside a pane, then press Enter or `y` to copy it through Herdr.
+Herdr's pane text copy works on Windows. Drag-select text inside a pane to copy through Herdr.
 
 For text paste, use `ctrl+shift+v` in Windows Terminal. Multiline text paste is bracketed so shells and agent prompts receive it as one paste instead of submitting each line separately. Hold `shift` and right-click to use the outer terminal paste action instead of sending the click through Herdr.
 
@@ -133,7 +133,7 @@ herdr --remote workbox
 
 The target host must run Linux or macOS. Herdr uses the installed Windows OpenSSH client and your SSH configuration. Windows OpenSSH does not use Herdr's Unix control-socket reuse, so key authentication through Windows `ssh-agent` is recommended to avoid repeated prompts during remote setup.
 
-Windows updates run through the Windows installer and update the versioned install junction. Restart running Herdr sessions after updating. Live handoff is Unix-only.
+Windows updates run through the Windows installer and update the versioned install junction. Start Herdr again to use the updated client; compatible running servers keep their panes alive. Restart a server later only when you need server-side changes from the release. Live handoff is Unix-only.
 
 ## Reporting Windows issues
 

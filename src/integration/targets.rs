@@ -8,7 +8,6 @@ use super::claude_settings::{
     install as install_claude_settings, uninstall as uninstall_claude_settings,
 };
 use super::command::hook_command;
-use super::{OPENCODE_TUI_PLUGIN_ASSET, OPENCODE_TUI_PLUGIN_INSTALL_NAME, OPENCODE_TUI_PLUGIN_SPEC};
 #[cfg(windows)]
 use super::command::powershell_encoded_hook_command;
 #[cfg(not(windows))]
@@ -56,10 +55,10 @@ use super::{
     KIMI_HOOK_ASSET, KIMI_HOOK_INSTALL_NAME, MASTRACODE_HOOK_ASSET, MASTRACODE_HOOK_EVENTS,
     MASTRACODE_HOOK_INSTALL_NAME, MASTRACODE_HOOK_TIMEOUT_MS, MASTRACODE_REMOVED_HOOK_EVENTS,
     OMP_EXTENSION_ASSET, OMP_EXTENSION_INSTALL_NAME, OPENCODE_PLUGIN_ASSET,
-    OPENCODE_PLUGIN_INSTALL_NAME, PI_EXTENSION_ASSET, PI_EXTENSION_INSTALL_NAME,
-    QODERCLI_HOOK_ASSET, QODERCLI_HOOK_EVENTS, QODERCLI_HOOK_INSTALL_NAME,
-    QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS, QWEN_HOOK_ASSET, QWEN_HOOK_EVENTS,
-    QWEN_HOOK_INSTALL_NAME, QWEN_HOOK_TIMEOUT_MS,
+    OPENCODE_PLUGIN_INSTALL_NAME, OPENCODE_TUI_PLUGIN_ASSET, OPENCODE_TUI_PLUGIN_INSTALL_NAME,
+    OPENCODE_TUI_PLUGIN_SPEC, PI_EXTENSION_ASSET, PI_EXTENSION_INSTALL_NAME, QODERCLI_HOOK_ASSET,
+    QODERCLI_HOOK_EVENTS, QODERCLI_HOOK_INSTALL_NAME, QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS,
+    QWEN_HOOK_ASSET, QWEN_HOOK_EVENTS, QWEN_HOOK_INSTALL_NAME,
 };
 
 fn ensure_extension_dir(dir: &Path, agent: &str) -> io::Result<()> {
@@ -954,10 +953,17 @@ pub(crate) fn install_qwen() -> io::Result<QwenInstallPaths> {
     let dir = qwen_dir()?;
     if !dir.is_dir() {
         return Err(io::Error::other(format!(
-            "qwen config directory not found at {}. install qwen code first",
+            "qwen code config directory not found at {}. install qwen code first",
             dir.display()
         )));
     }
+
+    let hooks_dir = dir.join("hooks");
+    fs::create_dir_all(&hooks_dir)?;
+
+    let hook_path = hooks_dir.join(QWEN_HOOK_INSTALL_NAME);
+    fs::write(&hook_path, QWEN_HOOK_ASSET)?;
+    make_executable(&hook_path)?;
 
     let settings_path = dir.join("settings.json");
     let mut settings = if settings_path.is_file() {
@@ -971,34 +977,23 @@ pub(crate) fn install_qwen() -> io::Result<QwenInstallPaths> {
         json!({})
     };
 
-    // Validate the shared settings shape before touching the managed script,
-    // so malformed user configuration fails without a partial install.
     let hooks = ensure_hooks_object(
         &mut settings,
         &settings_path,
         "qwen settings",
         "qwen settings hooks",
     )?;
-
-    let hooks_dir = dir.join("hooks");
-    let hook_path = hooks_dir.join(QWEN_HOOK_INSTALL_NAME);
-    for (event, _, action) in QWEN_HOOK_EVENTS {
+    for (event, action) in QWEN_HOOK_EVENTS {
         remove_hook_commands(hooks, event, &hook_path, Some(action))?;
-    }
-    for (event, matcher, action) in QWEN_HOOK_EVENTS {
         ensure_command_hook(
             hooks,
             event,
             hook_command(&hook_path, Some(action)),
-            QWEN_HOOK_TIMEOUT_MS,
-            matcher,
+            10_000,
+            Some("*"),
         )?;
     }
 
-    fs::create_dir_all(&hooks_dir)?;
-    fs::write(&hook_path, QWEN_HOOK_ASSET)?;
-    make_executable(&hook_path)?;
-    remove_legacy_bash_hook_file(&hook_path)?;
     fs::write(&settings_path, serde_json::to_string_pretty(&settings)?)?;
 
     Ok(QwenInstallPaths {
@@ -1110,9 +1105,8 @@ pub(crate) fn uninstall_qodercli() -> io::Result<QodercliUninstallResult> {
 }
 
 pub(crate) fn uninstall_qwen() -> io::Result<QwenUninstallResult> {
-    let qwen_home = qwen_dir()?;
-    let hook_path = qwen_home.join("hooks").join(QWEN_HOOK_INSTALL_NAME);
-    let settings_path = qwen_home.join("settings.json");
+    let hook_path = qwen_dir()?.join("hooks").join(QWEN_HOOK_INSTALL_NAME);
+    let settings_path = qwen_dir()?.join("settings.json");
     let mut updated_settings = false;
 
     if settings_path.is_file() {
@@ -1130,7 +1124,7 @@ pub(crate) fn uninstall_qwen() -> io::Result<QwenUninstallResult> {
             "qwen settings",
             "qwen settings hooks",
         )? {
-            for (event, _, action) in QWEN_HOOK_EVENTS {
+            for (event, action) in QWEN_HOOK_EVENTS {
                 updated_settings |= remove_hook_commands(hooks, event, &hook_path, Some(action))?;
             }
         }
@@ -1140,8 +1134,7 @@ pub(crate) fn uninstall_qwen() -> io::Result<QwenUninstallResult> {
         }
     }
 
-    let removed_hook_file =
-        remove_file_if_exists(&hook_path)? | remove_legacy_bash_hook_file(&hook_path)?;
+    let removed_hook_file = remove_file_if_exists(&hook_path)?;
 
     Ok(QwenUninstallResult {
         hook_path,

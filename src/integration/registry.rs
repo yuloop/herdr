@@ -2,7 +2,6 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::command::hook_command;
 use super::env::*;
 
 pub(crate) fn integration_target_label(
@@ -20,8 +19,8 @@ pub(crate) fn integration_target_label(
         crate::api::schema::IntegrationTarget::Opencode => "opencode",
         crate::api::schema::IntegrationTarget::Kilo => "kilo",
         crate::api::schema::IntegrationTarget::Hermes => "hermes",
-        crate::api::schema::IntegrationTarget::Qwen => "qwen",
         crate::api::schema::IntegrationTarget::Qodercli => "qodercli",
+        crate::api::schema::IntegrationTarget::Qwen => "qwen",
         crate::api::schema::IntegrationTarget::Cursor => "cursor",
         crate::api::schema::IntegrationTarget::Mastracode => "mastracode",
         crate::api::schema::IntegrationTarget::AntigravityCli => "antigravity-cli",
@@ -50,8 +49,8 @@ pub(crate) fn integration_target_command_names(
         crate::api::schema::IntegrationTarget::Opencode => &["opencode"],
         crate::api::schema::IntegrationTarget::Kilo => &["kilo", "kilo-code"],
         crate::api::schema::IntegrationTarget::Hermes => &["hermes"],
-        crate::api::schema::IntegrationTarget::Qwen => &["qwen"],
         crate::api::schema::IntegrationTarget::Qodercli => qodercli_command_names(),
+        crate::api::schema::IntegrationTarget::Qwen => &["qwen"],
         crate::api::schema::IntegrationTarget::Cursor => cursor_command_names(),
         crate::api::schema::IntegrationTarget::Mastracode => &["mastracode"],
         crate::api::schema::IntegrationTarget::AntigravityCli => &["agy"],
@@ -77,8 +76,8 @@ pub(crate) fn integration_target_supported(target: crate::api::schema::Integrati
                 | crate::api::schema::IntegrationTarget::Kilo
                 | crate::api::schema::IntegrationTarget::Droid
                 | crate::api::schema::IntegrationTarget::Kimi
-                | crate::api::schema::IntegrationTarget::Qwen
                 | crate::api::schema::IntegrationTarget::Qodercli
+                | crate::api::schema::IntegrationTarget::Qwen
                 | crate::api::schema::IntegrationTarget::AntigravityCli
                 | crate::api::schema::IntegrationTarget::Devin
                 | crate::api::schema::IntegrationTarget::Hermes
@@ -329,14 +328,14 @@ fn integration_specs() -> [(
             super::HERMES_INTEGRATION_VERSION,
         ),
         (
-            crate::api::schema::IntegrationTarget::Qwen,
-            qwen_dir().map(|dir| dir.join("hooks").join(super::QWEN_HOOK_INSTALL_NAME)),
-            super::QWEN_INTEGRATION_VERSION,
-        ),
-        (
             crate::api::schema::IntegrationTarget::Qodercli,
             qodercli_dir().map(|dir| dir.join("hooks").join(super::QODERCLI_HOOK_INSTALL_NAME)),
             super::QODERCLI_INTEGRATION_VERSION,
+        ),
+        (
+            crate::api::schema::IntegrationTarget::Qwen,
+            qwen_dir().map(|dir| dir.join("hooks").join(super::QWEN_HOOK_INSTALL_NAME)),
+            super::QWEN_INTEGRATION_VERSION,
         ),
         (
             crate::api::schema::IntegrationTarget::Cursor,
@@ -414,53 +413,20 @@ fn grok_hook_config_is_valid(hook_path: &Path) -> bool {
         .is_some_and(|config| config == super::targets::grok_hook_config(hook_path))
 }
 
-/// A Qwen hook file is functional only when every Herdr-owned lifecycle
-/// command is registered in the shared user settings. Formatting and object
-/// key order are deliberately ignored.
-fn qwen_hook_config_is_valid(hook_path: &Path) -> bool {
-    let Some(qwen_dir) = hook_path.parent().and_then(Path::parent) else {
+fn opencode_tui_integration_is_valid(plugin_path: &Path, expected_version: u32) -> bool {
+    let Some(config_dir) = plugin_path.parent().and_then(Path::parent) else {
         return false;
     };
-    let settings_path = qwen_dir.join("settings.json");
-    let Some(hooks) = fs::read_to_string(settings_path)
+    let tui_plugin_path = config_dir.join(super::OPENCODE_TUI_PLUGIN_INSTALL_NAME);
+    let tui_plugin_current = fs::read_to_string(tui_plugin_path)
         .ok()
-        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
-        .and_then(|settings| settings.get("hooks").cloned())
-        .and_then(|hooks| hooks.as_object().cloned())
-    else {
-        return false;
-    };
-
-    super::QWEN_HOOK_EVENTS
-        .iter()
-        .all(|(event, matcher, action)| {
-            let expected_command = hook_command(hook_path, Some(action));
-            hooks
-                .get(*event)
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|entries| {
-                    entries.iter().any(|entry| {
-                        entry.get("matcher").and_then(serde_json::Value::as_str) == *matcher
-                            && entry
-                                .get("hooks")
-                                .and_then(serde_json::Value::as_array)
-                                .is_some_and(|commands| {
-                                    commands.iter().any(|command| {
-                                        command.get("type").and_then(serde_json::Value::as_str)
-                                            == Some("command")
-                                            && command
-                                                .get("command")
-                                                .and_then(serde_json::Value::as_str)
-                                                == Some(expected_command.as_str())
-                                            && command
-                                                .get("timeout")
-                                                .and_then(serde_json::Value::as_u64)
-                                                == Some(super::QWEN_HOOK_TIMEOUT_MS)
-                                    })
-                                })
-                    })
-                })
-        })
+        .and_then(|content| parse_integration_version(&content))
+        .is_some_and(|version| version >= expected_version);
+    tui_plugin_current
+        && super::opencode_config::tui_plugin_is_configured(
+            config_dir,
+            super::OPENCODE_TUI_PLUGIN_SPEC,
+        )
 }
 
 pub(crate) fn integration_status_at(
@@ -497,9 +463,9 @@ pub(crate) fn integration_status_at(
     {
         state = super::IntegrationStatusKind::Outdated;
     }
-    if target == crate::api::schema::IntegrationTarget::Qwen
+    if target == crate::api::schema::IntegrationTarget::Opencode
         && state == super::IntegrationStatusKind::Current
-        && !qwen_hook_config_is_valid(&path)
+        && !opencode_tui_integration_is_valid(&path, expected_version)
     {
         state = super::IntegrationStatusKind::Outdated;
     }

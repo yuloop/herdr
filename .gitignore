@@ -1,5 +1,4 @@
 /target
-/release/
 node_modules/
 /vendor/libghostty-vt/zig-pkg/
 __pycache__/

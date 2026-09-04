@@ -140,9 +140,6 @@ pub fn plan(source: &str, agent: &str, session_ref: &AgentSessionRef) -> Option<
         ("herdr:droid", "droid", AgentSessionRefKind::Id) => {
             vec!["droid".into(), "--resume".into(), session_ref.value.clone()]
         }
-        ("herdr:qwen", "qwen", AgentSessionRefKind::Id) => {
-            vec!["qwen".into(), "--resume".into(), session_ref.value.clone()]
-        }
         ("herdr:kimi", "kimi", AgentSessionRefKind::Id) => {
             vec!["kimi".into(), "--session".into(), session_ref.value.clone()]
         }
@@ -235,7 +232,6 @@ pub(crate) fn is_official_agent_source(source: &str, agent: &str) -> bool {
             | ("herdr:copilot", "copilot")
             | ("herdr:devin", "devin")
             | ("herdr:droid", "droid")
-            | ("herdr:qwen", "qwen")
             | ("herdr:kimi", "kimi")
             | ("herdr:omp", "omp")
             | ("herdr:mastracode", "mastracode")
@@ -279,7 +275,6 @@ mod tests {
         assert!(is_reserved_native_state_source("herdr:claude", "claude"));
         assert!(is_reserved_native_state_source("herdr:codex", "codex"));
         assert!(is_reserved_native_state_source("herdr:devin", "devin"));
-        assert!(!is_reserved_native_state_source("herdr:qwen", "qwen"));
         assert!(!is_reserved_native_state_source("herdr:kimi", "kimi"));
         assert!(!is_reserved_native_state_source(
             "herdr:opencode",
@@ -340,16 +335,6 @@ mod tests {
             .unwrap()
             .argv,
             vec!["droid", "--resume", "droid-session"]
-        );
-        assert_eq!(
-            plan(
-                "herdr:qwen",
-                "qwen",
-                &AgentSessionRef::id("qwen-session").unwrap()
-            )
-            .unwrap()
-            .argv,
-            vec!["qwen", "--resume", "qwen-session"]
         );
         assert_eq!(
             plan(
@@ -616,11 +601,6 @@ mod tests {
                 .unwrap();
         assert_eq!(session_ref.kind, AgentSessionRefKind::Id);
         assert_eq!(session_ref.value, "agy-id");
-
-        let session_ref =
-            session_ref_from_report("herdr:qwen", "qwen", Some("qwen-id".into()), None).unwrap();
-        assert_eq!(session_ref.kind, AgentSessionRefKind::Id);
-        assert_eq!(session_ref.value, "qwen-id");
         assert!(
             session_ref_from_report("custom:qwen", "qwen", Some("qwen-id".into()), None).is_none()
         );

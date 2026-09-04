@@ -61,11 +61,9 @@ impl TerminalRuntimeRegistry {
     }
 
     #[cfg(unix)]
-    pub(crate) fn nudge_handoff_runtimes_once(&self) {
+    pub(crate) fn nudge_child_redraw_after_handoff(&self) {
         for runtime in self.runtimes.values() {
-            if runtime.take_handoff_repaint_needed() {
-                runtime.nudge_child_redraw_after_handoff();
-            }
+            runtime.nudge_child_redraw_after_handoff();
         }
     }
 
@@ -85,27 +83,5 @@ impl TerminalRuntimeRegistry {
 impl From<HashMap<TerminalId, TerminalRuntime>> for TerminalRuntimeRegistry {
     fn from(runtimes: HashMap<TerminalId, TerminalRuntime>) -> Self {
         Self { runtimes }
-    }
-}
-
-#[cfg(all(test, unix))]
-mod tests {
-    use std::sync::atomic::Ordering;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn handoff_nudge_only_consumes_flagged_runtimes_once() {
-        let (replayed, replayed_nudges) = TerminalRuntime::test_with_handoff_repaint_needed(false);
-        let (blank, blank_nudges) = TerminalRuntime::test_with_handoff_repaint_needed(true);
-        let mut registry = TerminalRuntimeRegistry::new();
-        registry.insert(TerminalId::alloc(), replayed);
-        registry.insert(TerminalId::alloc(), blank);
-
-        registry.nudge_handoff_runtimes_once();
-        registry.nudge_handoff_runtimes_once();
-
-        assert_eq!(replayed_nudges.load(Ordering::Acquire), 0);
-        assert_eq!(blank_nudges.load(Ordering::Acquire), 1);
     }
 }

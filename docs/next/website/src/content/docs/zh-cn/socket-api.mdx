@@ -101,7 +101,7 @@ herdr pane read w1:p2 --source recent --lines 50
 | 标签页 | `tab.create`、`tab.list`、`tab.get`、`tab.focus`、`tab.rename`、`tab.move`、`tab.close` |
 | 窗格 | `pane.split`、`pane.swap`、`pane.move`、`pane.zoom`、`pane.layout`、`pane.process_info`、`pane.neighbor`、`pane.edges`、`pane.focus_direction`、`pane.resize`、`pane.list`、`pane.current`、`pane.get`、`pane.rename`、`pane.send_text`、`pane.send_keys`、`pane.send_input`、`pane.read`、`pane.graphics.info`、`pane.graphics.set`、`pane.graphics.clear`、`pane.graphics.stream`、`pane.report_agent`、`pane.report_agent_session`、`pane.report_metadata`、`pane.clear_agent_authority`、`pane.release_agent`、`pane.close`、`pane.wait_for_output` |
 | 弹窗 | `popup.close` |
-| 布局 | `layout.export`、`layout.apply`、`layout.set_split_ratio`、`layout.rearrange` |
+| 布局 | `layout.export`、`layout.apply`、`layout.set_split_ratio` |
 | 智能体 | `agent.list`、`agent.get`、`agent.read`、`agent.explain`、`agent.send_keys`、`agent.prompt`、`agent.wait`、`agent.rename`、`agent.focus`、`agent.start` |
 | 事件 | `events.subscribe`、`events.wait` |
 | 集成 | `integration.install`、`integration.uninstall` |
@@ -210,15 +210,6 @@ CLI 的 `herdr api snapshot` 会把当前 `session.snapshot` 响应输出为 JSO
 ```json
 {"id":"req_ratio","method":"layout.set_split_ratio","params":{"tab_id":"w1:t1","path":[],"ratio":0.6}}
 ```
-
-`layout.rearrange` 只重建已有运行窗格周围的布局树，保留窗格 id、终端归属、进程状态和每个窗格的回滚缓冲。重新放置操作把 `source_pane_id` 移到 `target_pane_id` 旁边；`placement` 可为 `left`、`right`、`up` 或 `down`，可选的 `ratio` 默认为 `0.5`。模板操作会让 `anchor_pane_id` 成为第一个或主窗格，其余窗格保持当前视觉顺序。模板可为 `columns`、`rows`、`grid`、`main_left` 和 `main_top`。
-
-```json
-{"id":"req_reposition","method":"layout.rearrange","params":{"operation":{"type":"reposition","source_pane_id":"w1:p3","target_pane_id":"w1:p1","placement":"left"},"focus":true}}
-{"id":"req_template","method":"layout.rearrange","params":{"operation":{"type":"preset","anchor_pane_id":"w1:p3","preset":"main_left"},"focus":true}}
-```
-
-源窗格和目标窗格必须属于同一个未缩放标签页。响应是 `type: "layout_rearrange"`，`rearrange` 下包含 `changed`、可选的 `reason`、锚点/目标/聚焦窗格 id 和更新后的布局快照。未改变时的 reason 可为 `same_pane`、`cross_tab`、`zoomed_tab`、`single_pane` 或 `unchanged`。成功修改后会发出 `layout.updated`。
 
 启动进程的方法接受一个 `env` 对象。Herdr 只把这些键值对应用到新启动的进程。Herdr 还向受管窗格进程注入 `HERDR_SOCKET_PATH`、`HERDR_ENV=1`、`HERDR_WORKSPACE_ID`、`HERDR_TAB_ID` 和 `HERDR_PANE_ID`。与调用方提供的环境变量冲突时,Herdr 管理的变量保持权威。
 
@@ -754,6 +745,6 @@ herdr agent wait w1:p1 --until blocked
 
 ## 协议稳定性
 
-Herdr 有一个用于客户端/服务器兼容性的协议版本。协议变更会在考虑发布兼容性的前提下进行评审。
+由客户端渲染的 Herdr UI 对本地和 SSH 服务器使用稳定的端点代数。客户端和服务器构建不必一致。连接时,双方会协商核心快照、屏幕、输入和 blob 编解码器,服务器则公布它支持的 API 方法。缺少方法时,只禁用该服务器上的对应操作并显示客户端本地通知;操作被拒绝或超时也不会断开连接。只有早于端点第 1 代的服务器需要最后更新一次。
 
-在依赖新行为之前,用 `ping` 或 `herdr status` 检查服务器协议。对未知字段做宽容处理。
+带编号的二进制协议仍用于同一安装内的内部操作,包括直接终端连接和实时交接。跨不同构建使用这些操作前,请检查 `ping` 或 `herdr status`。JSON API 客户端应忽略未知字段,并把不支持的方法当作普通错误处理。

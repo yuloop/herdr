@@ -34,20 +34,19 @@ fn command_for_program(program: &OsStr) -> Command {
         || program.to_os_string(),
         |path| path.as_os_str().to_os_string(),
     );
-    let command_processor = crate::platform::system_command_processor();
-    let mut command = if is_windows_batch_file_name(program)
+    if is_windows_batch_file_name(program)
         || resolved
             .as_ref()
             .is_some_and(|path| is_windows_batch_path(path))
     {
-        let mut command = crate::noninteractive_process::command(&command_processor);
+        let shell =
+            std::env::var_os("ComSpec").unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into());
+        let mut command = crate::noninteractive_process::command(shell);
         command.arg("/d").arg("/c").arg(command_program);
         command
     } else {
         crate::noninteractive_process::command(command_program)
-    };
-    command.env("ComSpec", command_processor);
-    command
+    }
 }
 
 #[cfg(windows)]
@@ -157,8 +156,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn windows_batch_command_ignores_inherited_comspec_and_captures_output() {
-        let _lock = crate::integration::integration_env_lock();
+    fn windows_batch_command_captures_output() {
         let path = std::env::temp_dir().join(format!(
             "herdr-plugin-command-output-{}.cmd",
             std::process::id()
@@ -166,28 +164,10 @@ mod tests {
         std::fs::write(&path, "@echo off\r\necho plugin-%1\r\n").expect("write batch fixture");
         let cwd = path.parent().expect("batch fixture parent");
 
-        let inherited_comspec = std::env::var_os("ComSpec");
-        std::env::set_var(
-            "ComSpec",
-            path.with_file_name("not-a-command-processor.exe"),
-        );
-        let mut command =
-            command_for_argv_in_dir(&path.display().to_string(), &["ready".to_string()], cwd);
-        match inherited_comspec {
-            Some(value) => std::env::set_var("ComSpec", value),
-            None => std::env::remove_var("ComSpec"),
-        }
-
-        let command_processor = crate::platform::system_command_processor();
-        assert_eq!(command.get_program(), command_processor.as_os_str());
-        assert_eq!(
-            command
-                .get_envs()
-                .find(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case("ComSpec"))
-                .and_then(|(_, value)| value),
-            Some(command_processor.as_os_str())
-        );
-        let output = command.output().expect("run batch fixture");
+        let output =
+            command_for_argv_in_dir(&path.display().to_string(), &["ready".to_string()], cwd)
+                .output()
+                .expect("run batch fixture");
         let _ = std::fs::remove_file(&path);
 
         assert!(output.status.success(), "{output:?}");
@@ -211,16 +191,9 @@ mod tests {
         let executable = root.join("tool.exe");
         std::fs::copy(source, &executable).expect("copy relative command fixture");
 
-        let mut command = command_for_argv_in_dir("./tool.exe", &["/?".to_string()], &root);
-        let command_processor = crate::platform::system_command_processor();
-        assert_eq!(
-            command
-                .get_envs()
-                .find(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case("ComSpec"))
-                .and_then(|(_, value)| value),
-            Some(command_processor.as_os_str())
-        );
-        let output = command.output().expect("run relative executable");
+        let output = command_for_argv_in_dir("./tool.exe", &["/?".to_string()], &root)
+            .output()
+            .expect("run relative executable");
         let _ = std::fs::remove_dir_all(&root);
 
         assert!(output.status.success(), "{output:?}");

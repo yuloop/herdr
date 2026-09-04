@@ -15,7 +15,7 @@ include = [
     "locales/**/*",
     "docs/next/api/herdr-api.schema.json",
     "skills/herdr/SKILL.md",
-    "website/install.ps1",
+    "distribution/install.ps1",
     "README.md",
     "LICENSE",
     "Cargo.toml",

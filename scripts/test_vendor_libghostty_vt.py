@@ -91,7 +91,7 @@ class VendorLibghosttyVtTests(unittest.TestCase):
         project_root = Path(__file__).resolve().parent.parent
         metadata = project_root / "vendor" / "libghostty-vt.vendor.json"
         self.assertTrue(metadata.exists())
-        text = metadata.read_text(encoding="utf-8")
+        text = metadata.read_text()
         self.assertIn('"source_commit"', text)
         self.assertIn('"dist_archive"', text)
         self.assertIn('"extracted_dir"', text)
@@ -106,11 +106,11 @@ class VendorLibghosttyVtTests(unittest.TestCase):
             return
 
         self.assertTrue(index.exists())
-        text = index.read_text(encoding="utf-8")
+        text = index.read_text()
         missing = [
-            path.relative_to(project_root).as_posix()
+            str(path.relative_to(project_root))
             for path in patches
-            if path.relative_to(project_root).as_posix() not in text
+            if str(path.relative_to(project_root)) not in text
         ]
         self.assertEqual(missing, [])
 
@@ -120,13 +120,7 @@ class VendorLibghosttyVtTests(unittest.TestCase):
 
         for patch in sorted(patch_dir.glob("*.patch")):
             result = subprocess.run(
-                [
-                    "git",
-                    "apply",
-                    "--check",
-                    "--reverse",
-                    patch.relative_to(project_root).as_posix(),
-                ],
+                ["git", "apply", "--check", "--reverse", str(patch.relative_to(project_root))],
                 cwd=project_root,
                 text=True,
                 capture_output=True,
@@ -143,8 +137,8 @@ class VendorLibghosttyVtTests(unittest.TestCase):
         root = Path(__file__).resolve().parent.parent / "vendor" / "libghostty-vt"
         lib_vt = root / "src" / "lib_vt.zig"
         sys_zig = root / "src" / "terminal" / "c" / "sys.zig"
-        lib_text = lib_vt.read_text(encoding="utf-8")
-        sys_text = sys_zig.read_text(encoding="utf-8")
+        lib_text = lib_vt.read_text()
+        sys_text = sys_zig.read_text()
         self.assertIn('.logFn = @import("terminal/c/sys.zig").logFn', lib_text)
         self.assertIn("if (global.log == null) return;", sys_text)
 

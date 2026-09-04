@@ -3,10 +3,7 @@
 //! When the user runs `herdr` with no subcommand:
 //! 1. Check if a server is already listening on the client socket
 //! 2. If no server → spawn one as a background daemon → wait for socket readiness (up to 15s)
-//! 3. Attach as a thin client to the server
-//!
-//! The `--no-session` flag bypasses server/client entirely and runs monolithically
-//! (escape hatch for users who want the traditional single-process behavior).
+//! 3. Attach as a client to the server
 
 use std::io;
 use std::path::Path;
@@ -73,7 +70,7 @@ fn is_server_listening_at(socket_path: &Path) -> bool {
             Ok(_) => {
                 // Server is listening. Close the test connection immediately.
                 // The server's handshake handler will time out on this connection
-                // since we don't send Hello, which is fine.
+                // since we don't send a handshake, which is fine.
                 true
             }
             Err(err)
@@ -143,15 +140,13 @@ fn client_protocol_accepts_hello(socket_path: &Path) -> io::Result<bool> {
         Err(err) => return Err(err),
     };
 
-    let hello = crate::protocol::ClientMessage::Hello {
+    let hello = crate::protocol::ClientMessage::TerminalHello {
         version: crate::protocol::PROTOCOL_VERSION,
         cols: 80,
         rows: 24,
         cell_width_px: 0,
         cell_height_px: 0,
-        requested_encoding: crate::protocol::RenderEncoding::SemanticFrame,
-        keybindings: crate::protocol::ClientKeybindings::Server,
-        launch_mode: crate::protocol::ClientLaunchMode::App,
+        pixel_mouse: false,
     };
 
     match crate::protocol::write_message(&mut stream, &hello) {
@@ -173,7 +168,6 @@ fn client_protocol_accepts_hello(socket_path: &Path) -> io::Result<bool> {
     }
 }
 
-#[cfg(not(windows))]
 fn validate_running_server_compatibility() -> io::Result<()> {
     let Some(status) = read_server_status()? else {
         return Err(io::Error::other(format!(
@@ -182,23 +176,22 @@ fn validate_running_server_compatibility() -> io::Result<()> {
         )));
     };
 
-    validate_server_status_compatibility(&status)
-}
-
-fn validate_server_status_compatibility(status: &crate::api::RuntimeStatus) -> io::Result<()> {
-    if status.protocol == Some(crate::protocol::PROTOCOL_VERSION) {
+    let endpoint_generation = status
+        .capabilities
+        .as_ref()
+        .and_then(|capabilities| capabilities.endpoint_protocol_generation);
+    if endpoint_generation == Some(crate::protocol::endpoint::ENDPOINT_PROTOCOL_GENERATION) {
         return Ok(());
     }
 
     Err(io::Error::other(format!(
-        "Herdr was updated, but this session is still running the old server.\n\nserver: v{} protocol {}\nclient: v{} protocol {}\n\n{}",
+        "This session predates Herdr's stable endpoint protocol and needs one final server update.\n\nserver: v{} endpoint generation {}\nclient: v{} endpoint generation {}\n\n{}",
         status.version.as_deref().unwrap_or("unknown"),
-        status
-            .protocol
+        endpoint_generation
             .map(|value| value.to_string())
-            .unwrap_or_else(|| "unknown".to_string()),
+            .unwrap_or_else(|| "unavailable".to_string()),
         crate::build_info::version(),
-        crate::protocol::PROTOCOL_VERSION,
+        crate::protocol::endpoint::ENDPOINT_PROTOCOL_GENERATION,
         crate::session::active_restart_after_update_guidance()
     )))
 }
@@ -312,7 +305,7 @@ pub fn wait_for_server_socket(socket_path: &Path, timeout: Duration) -> io::Resu
 /// attach as a thin client.
 ///
 /// This is the entry point called from `main.rs` when the user runs `herdr`
-/// without `--no-session` and without a subcommand.
+/// without a subcommand.
 ///
 /// Flow:
 /// 1. Check if a server is listening on the client socket
@@ -322,21 +315,7 @@ pub fn auto_detect_launch() -> io::Result<()> {
     let socket_path = client_socket_path();
     info!(path = %socket_path.display(), "auto-detect launch starting");
 
-    #[cfg(windows)]
-    let running_status = read_server_status_with_retry()?;
-    #[cfg(windows)]
-    let server_running = running_status.is_some();
-    #[cfg(not(windows))]
-    let server_running = is_server_listening_at(&socket_path);
-
-    if server_running {
-        #[cfg(windows)]
-        if let Some(status) = running_status.as_ref() {
-            // Reuse the successful status response instead of issuing a second
-            // API request that can fail transiently before client logging starts.
-            validate_server_status_compatibility(status)?;
-        }
-        #[cfg(not(windows))]
+    if is_server_listening_at(&socket_path) {
         validate_running_server_compatibility()?;
         info!("server already running, attaching as client");
     } else {

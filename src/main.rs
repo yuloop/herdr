@@ -1,12 +1,5 @@
 use std::io;
 
-use crossterm::event::{
-    DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
-    EnableFocusChange, EnableMouseCapture,
-};
-#[cfg(not(windows))]
-use crossterm::event::{PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
-use crossterm::execute;
 use rust_i18n::t;
 
 pub(crate) const HERDR_ENV_VAR: &str = "HERDR_ENV";
@@ -20,41 +13,6 @@ const NESTED_HERDR_MESSAGES: [&str; 6] = [
     "recursion detected. base case not found. aborting.",
 ];
 
-#[cfg(not(windows))]
-fn push_keyboard_enhancement_flags() -> io::Result<()> {
-    execute!(
-        io::stdout(),
-        PushKeyboardEnhancementFlags(crate::input::ime_compatible_keyboard_enhancement_flags())
-    )
-}
-
-#[cfg(windows)]
-fn push_keyboard_enhancement_flags() -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn pop_keyboard_enhancement_flags() -> io::Result<()> {
-    execute!(io::stdout(), PopKeyboardEnhancementFlags)
-}
-
-#[cfg(windows)]
-fn pop_keyboard_enhancement_flags() -> io::Result<()> {
-    Ok(())
-}
-
-fn set_host_color_scheme_reports(enabled: bool) -> io::Result<()> {
-    use std::io::Write;
-
-    let sequence = if enabled {
-        crate::terminal_theme::HOST_COLOR_SCHEME_REPORT_ENABLE_SEQUENCE
-    } else {
-        crate::terminal_theme::HOST_COLOR_SCHEME_REPORT_DISABLE_SEQUENCE
-    };
-    io::stdout().write_all(sequence.as_bytes())?;
-    io::stdout().flush()
-}
-
 mod agent_resume;
 mod api;
 mod app;
@@ -63,14 +21,13 @@ mod checksum;
 mod cli;
 mod client;
 mod config;
+mod copy_mode;
 mod detect;
 mod events;
 mod ghostty;
 mod handoff_runtime;
 mod i18n;
 mod input;
-
-rust_i18n::i18n!("locales", fallback = "en");
 mod integration;
 mod ipc;
 mod kitty_graphics;
@@ -107,9 +64,7 @@ mod update;
 mod workspace;
 mod worktree;
 
-fn init_logging() {
-    crate::logging::init_file_logging("herdr.log");
-}
+rust_i18n::i18n!("locales", fallback = "en");
 
 const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Place this file at ~/.config/herdr/config.toml
@@ -299,10 +254,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Pane apps like lazygit and btop can still receive mouse when they request it.
 # mouse_capture = true
 
-# Mouse selection behavior: false or "manual" (the default) retains the selection
-# for Ctrl/Cmd+C, Enter, or y to copy and Esc to cancel. Use true or "clipboard"
-# to copy immediately after selecting.
-# Use "disabled" to disable mouse text selection and copying entirely.
+# Mouse selection behavior: "clipboard" copies on select, "manual" retains
+# drag or double-click word selection until Ctrl+C, Enter, or y copies it
+# and Esc clears it, "disabled" turns selection off. Also accepts true/false.
 # copy_on_select = "manual"
 
 # Host cursor policy: "auto", "native", or "drawn".
@@ -395,7 +349,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Custom values reported through workspace metadata use a $name token, for example $jj_status.
 # Inline token styles accept strict #RGB/#RRGGBB foregrounds plus bold and dim booleans.
 # [ui.sidebar.spaces]
-# Additional blank rows after the separator between expanded space entries.
+# Blank rows between space entries. Set to 1 to restore the previous spacing.
 # row_gap = 0
 # rows = [["state_icon", "workspace"], ["branch", "git_status"]]
 
@@ -475,7 +429,8 @@ pane_history = false
 # matches one of these names. Empty means apply to any focused pane.
 # If the list contains no valid names, the reveal does not apply.
 # Accepted: pi, claude, codex, gemini, cursor, devin, cline, opencode,
-# qwen, copilot, kimi, kiro, droid, amp, grok, hermes, kilo, qodercli, qoder.
+# copilot, kimi, kiro, droid, amp, grok, hermes, kilo, qodercli, qoder, qwen,
+# qwen-code, maki.
 # cjk_ime_agents = []
 # Cursor shape rendered when reveal_hidden_cursor_for_cjk_ime is true.
 # Values: block, steady_block (default), underline, steady_underline, bar, steady_bar.
@@ -491,24 +446,11 @@ pane_history = false
 const SKILL: &str = include_str!("../skills/herdr/SKILL.md");
 
 fn should_block_nested(config: &config::Config) -> bool {
-    let herdr_env = std::env::var(HERDR_ENV_VAR).ok();
-    #[cfg(windows)]
-    let standalone_console = crate::platform::current_process_has_standalone_console();
-    #[cfg(not(windows))]
-    let standalone_console = false;
-    should_block_nested_for_launch(config, herdr_env.as_deref(), standalone_console)
+    should_block_nested_for_env(config, std::env::var(HERDR_ENV_VAR).ok().as_deref())
 }
 
 fn should_block_nested_for_env(config: &config::Config, herdr_env: Option<&str>) -> bool {
     !config.experimental.allow_nested && herdr_env == Some(HERDR_ENV_VALUE)
-}
-
-fn should_block_nested_for_launch(
-    config: &config::Config,
-    herdr_env: Option<&str>,
-    standalone_console: bool,
-) -> bool {
-    should_block_nested_for_env(config, herdr_env) && !standalone_console
 }
 
 fn random_nested_message() -> &'static str {
@@ -524,8 +466,8 @@ fn random_nested_message() -> &'static str {
 
 fn exit_if_nested_disabled(config: &config::Config) {
     if should_block_nested(config) {
-        eprintln!("\x1b[1merror:\x1b[0m nested herdr is disabled by default.");
-        eprintln!("see configuration if you want to enable it.");
+        eprintln!("\x1b[1merror:\x1b[0m {}", t!("cli.nested_disabled"));
+        eprintln!("{}", t!("cli.nested_hint"));
         eprintln!();
         eprintln!("\x1b[2m\"{}\"\x1b[0m", random_nested_message());
         std::process::exit(1);
@@ -550,7 +492,7 @@ fn main() -> io::Result<()> {
         Ok(args) => args,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("{}", t!("cli.run_help_for_usage"));
             std::process::exit(2);
         }
     };
@@ -558,7 +500,7 @@ fn main() -> io::Result<()> {
         Ok(args) => args,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("{}", t!("cli.run_help_for_usage"));
             std::process::exit(2);
         }
     };
@@ -566,13 +508,10 @@ fn main() -> io::Result<()> {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("{}", t!("cli.run_help_for_usage"));
             std::process::exit(2);
         }
     };
-
-    #[cfg(windows)]
-    let windows_default_launch = args.len() == 1 && remote_launch.is_none();
 
     if remote_launch.is_some()
         && args.get(1).is_some()
@@ -583,30 +522,9 @@ fn main() -> io::Result<()> {
             )
         })
     {
-        eprintln!("error: --remote can only be used with the default launch command");
-        eprintln!("run 'herdr --help' for usage");
+        eprintln!("error: {}", t!("cli.remote_only_default"));
+        eprintln!("{}", t!("cli.run_help_for_usage"));
         std::process::exit(2);
-    }
-
-    // CLI 子命令（update/status 等）分发前先应用语言设置，确保命令输出也使用
-    // config.toml 中 ui.language 指定的 locale。
-    {
-        let early_config = config::Config::load();
-        i18n::apply_locale(&early_config.config.ui.language);
-    }
-
-    #[cfg(windows)]
-    if windows_default_launch {
-        crate::logging::init_file_logging("herdr-client.log");
-        tracing::info!(
-            event = "windows.launch.start",
-            subsystem = "launcher",
-            outcome = "started",
-            pid = std::process::id(),
-            standalone_console = crate::platform::current_process_has_standalone_console(),
-            inherited_herdr_env = std::env::var_os(HERDR_ENV_VAR).is_some(),
-            "Windows default launch starting"
-        );
     }
 
     match cli::maybe_run(&args) {
@@ -631,6 +549,13 @@ fn main() -> io::Result<()> {
 
     if args.get(1).map(|s| s.as_str()) == Some("server") {
         return server::headless::run_server();
+    }
+
+    // CLI 子命令（update/status 等）分发前先应用语言设置，确保命令输出也使用
+    // config.toml 中 ui.language 指定的 locale。
+    {
+        let early_config = config::Config::load();
+        i18n::apply_locale(&early_config.config.ui.language);
     }
 
     // Hidden client mode: connect to an existing server's client socket.
@@ -667,6 +592,7 @@ fn main() -> io::Result<()> {
     }
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
+        platform::begin_cli_output();
         println!("herdr — {}", t!("cli.herdr_about"));
         println!();
         println!("{}: herdr [options]", t!("cli.root_usage_heading"));
@@ -688,10 +614,8 @@ fn main() -> io::Result<()> {
         println!("       herdr notification <subcommand> ...");
         println!("       herdr agent <subcommand> ...");
         println!("       herdr pane <subcommand> ...");
-        println!("       herdr terminal <subcommand> ...");
         println!("       herdr session <subcommand> ...");
         println!("       herdr integration <subcommand> ...");
-        println!("       herdr plugin <subcommand> ...");
         println!();
         println!("{}:", t!("cli.root_common_commands"));
         for (command, description) in [
@@ -720,13 +644,11 @@ fn main() -> io::Result<()> {
             ),
             ("herdr agent <subcommand>", t!("cli.agent_about")),
             ("herdr pane <subcommand>", t!("cli.pane_about")),
-            ("herdr terminal <subcommand>", t!("cli.terminal_about")),
             ("herdr session <subcommand>", t!("cli.session_about")),
             (
                 "herdr integration <subcommand>",
                 t!("cli.integration_about"),
             ),
-            ("herdr plugin <subcommand>", t!("cli.plugin_about")),
         ] {
             println!("  {command:<32} {description}");
         }
@@ -735,22 +657,19 @@ fn main() -> io::Result<()> {
         println!("  {:<32} {}", "herdr server", t!("cli.server_about"));
         println!();
         println!("{}:", t!("cli.root_options_heading"));
-        for (option, description) in [
-            ("--no-session", t!("cli.no_session_help")),
-            ("--session <name>", t!("cli.session_help")),
-            ("--remote <target>", t!("cli.remote_help")),
-            (
-                "--remote-keybindings <local|server>",
-                t!("cli.remote_keybindings_help"),
-            ),
-            ("--handoff", t!("cli.handoff_help")),
-            ("--default-config", t!("cli.default_config_help")),
-            ("--skill", t!("cli.skill_help")),
-            ("--version, -V", t!("cli.version_help")),
-            ("--help, -h", t!("cli.help_help")),
-        ] {
-            println!("  {option:<40} {description}");
-        }
+        println!("  --no-session    {}", t!("cli.no_session_help"));
+        println!("  --session <name>    {}", t!("cli.session_help"));
+        println!("  --remote <target>   {}", t!("cli.remote_help"));
+        println!("  --remote-keybindings <local|server>");
+        println!(
+            "                      {}",
+            t!("cli.remote_keybindings_help")
+        );
+        println!("  --handoff           {}", t!("cli.handoff_help"));
+        println!("  --default-config    {}", t!("cli.default_config_help"));
+        println!("  --skill             {}", t!("cli.skill_help"));
+        println!("  --version, -V       {}", t!("cli.version_help"));
+        println!("  --help, -h          {}", t!("cli.help_help"));
         println!();
         println!(
             "{}: {}",
@@ -773,6 +692,8 @@ fn main() -> io::Result<()> {
             t!("cli.root_skill_label"),
             t!("cli.root_skill_hint")
         );
+        println!();
+        println!("{}", cli::AGENT_HELP_FOOTER);
         return Ok(());
     }
 
@@ -811,7 +732,7 @@ fn main() -> io::Result<()> {
         let arg_name = arg.split_once('=').map(|(name, _)| name).unwrap_or(arg);
         if arg.starts_with('-') && !known_flags.contains(&arg_name) {
             eprintln!("unknown option: {arg}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("{}", t!("cli.run_help_for_usage"));
             std::process::exit(2);
         }
         if !arg.starts_with('-')
@@ -832,7 +753,7 @@ fn main() -> io::Result<()> {
             .contains(&arg.as_str())
         {
             eprintln!("unknown command: {arg}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("{}", t!("cli.run_help_for_usage"));
             std::process::exit(2);
         }
     }
@@ -851,155 +772,17 @@ fn main() -> io::Result<()> {
     exit_if_nested_disabled(&loaded_config.config);
     i18n::apply_locale(&loaded_config.config.ui.language);
 
-    let no_session = args.iter().any(|a| a == "--no-session");
-
-    // Auto-detect launch: when --no-session is NOT set, use server/client mode.
-    // Check if a server is running, spawn one if needed, then attach as client.
-    if !no_session {
-        if let Err(err) = server::autodetect::auto_detect_launch() {
-            eprintln!("herdr: {err}");
-            #[cfg(windows)]
-            if windows_default_launch {
-                let log_path = crate::session::data_dir().join("herdr-client.log");
-                tracing::error!(
-                    event = "windows.launch.fail",
-                    subsystem = "launcher",
-                    outcome = "error",
-                    %err,
-                    path = %log_path.display(),
-                    "Windows default launch failed"
-                );
-                let title = t!("startup.windows_error_title").to_string();
-                let message = t!(
-                    "startup.windows_error_body",
-                    error = err.to_string(),
-                    log_path = log_path.display().to_string()
-                )
-                .to_string();
-                crate::platform::show_startup_error_dialog(&title, &message);
-            }
-            std::process::exit(1);
-        }
-        return Ok(());
+    // --no-session escape hatch: ignore any persistent named session and
+    // launch against the default session scope.
+    if args.iter().any(|a| a == "--no-session") {
+        std::env::remove_var(crate::session::SESSION_ENV_VAR);
     }
 
-    // --- Monolithic mode (--no-session escape hatch) ---
-    // This is the pre-mission single-process behavior.
-
-    init_logging();
-
-    let (api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-    let event_hub = api::EventHub::default();
-    let _api_server = match api::start_server_with_capabilities(api_tx, event_hub.clone(), None) {
-        Ok(server) => server,
-        Err(err) if err.kind() == io::ErrorKind::AddrInUse => {
-            eprintln!("error: herdr is already running");
-            eprintln!("socket: {}", api::socket_path().display());
-            std::process::exit(1);
-        }
-        Err(err) => return Err(err),
-    };
-
-    let modify_other_keys_mode = crate::input::host_modify_other_keys_mode();
-
-    let original_hook = std::panic::take_hook();
-    let panic_resets_modify_other_keys = modify_other_keys_mode.is_some();
-    std::panic::set_hook(Box::new(move |info| {
-        tracing::error!("PANIC: {info}");
-        if panic_resets_modify_other_keys {
-            let _ = std::io::Write::write_all(&mut io::stdout(), b"\x1b[>4;0m");
-        }
-        if crate::kitty_graphics::is_enabled() {
-            let _ = crate::kitty_graphics::clear_all_host_graphics();
-        }
-        let _ = execute!(
-            io::stdout(),
-            DisableFocusChange,
-            DisableBracketedPaste,
-            DisableMouseCapture
-        );
-        let _ = crate::terminal_modes::clear_host_mouse_reporting(&mut io::stdout());
-        let _ = set_host_color_scheme_reports(false);
-        let _ = pop_keyboard_enhancement_flags();
-        ratatui::restore();
-        original_hook(info);
-    }));
-
-    let config = &loaded_config.config;
-    let config_diagnostic = config::config_diagnostic_summary(&loaded_config.diagnostics);
-    logging::startup("app");
-
-    // Background update check (non-blocking, best-effort)
-    // Only checks for newer versions and notifies the TUI.
-    // Skipped in --no-session mode (testing).
-
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("failed to create tokio runtime");
-
-    let result = rt.block_on(async {
-        let mut terminal = ratatui::init();
-        crate::terminal_modes::clear_host_mouse_reporting(&mut io::stdout())?;
-        if config.ui.mouse_capture {
-            execute!(io::stdout(), EnableMouseCapture)?;
-        } else {
-            execute!(io::stdout(), DisableMouseCapture)?;
-        }
-        execute!(io::stdout(), EnableBracketedPaste, EnableFocusChange)?;
-        set_host_color_scheme_reports(true)?;
-        push_keyboard_enhancement_flags()?;
-
-        // Some hosts do not honor Kitty keyboard enhancement pushes for
-        // Shift+Enter. Enable xterm modifyOtherKeys only on hosts where we
-        // know it is needed and parseable, so modified Enter stays distinct.
-        if let Some(mode) = modify_other_keys_mode {
-            use std::io::Write;
-            std::io::stdout().write_all(mode.set_sequence())?;
-            std::io::stdout().flush()?;
-        }
-
-        let mut app = app::App::new(
-            config,
-            true, // no_session — monolithic mode never saves/restores sessions
-            config_diagnostic,
-            api_rx,
-            event_hub,
-        );
-        let result = app.run(&mut terminal).await;
-
-        // Reset modifyOtherKeys if we enabled it.
-        if modify_other_keys_mode.is_some() {
-            use std::io::Write;
-            std::io::stdout().write_all(b"\x1b[>4;0m")?;
-            std::io::stdout().flush()?;
-        }
-
-        if crate::kitty_graphics::is_enabled() {
-            crate::kitty_graphics::clear_all_host_graphics()?;
-        }
-        pop_keyboard_enhancement_flags()?;
-        execute!(
-            io::stdout(),
-            DisableFocusChange,
-            DisableBracketedPaste,
-            DisableMouseCapture
-        )?;
-        crate::terminal_modes::clear_host_mouse_reporting(&mut io::stdout())?;
-        set_host_color_scheme_reports(false)?;
-        ratatui::restore();
-
-        // Drop app (and all workspaces/panes) before runtime shuts down
-        drop(app);
-
-        result
-    });
-
-    // Shut down runtime immediately — kills lingering PTY reader/writer tasks
-    rt.shutdown_timeout(std::time::Duration::from_millis(100));
-
-    logging::shutdown("app");
-    result
+    if let Err(err) = server::autodetect::auto_detect_launch() {
+        eprintln!("herdr: {err}");
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1023,26 +806,6 @@ mod tests {
     fn nested_herdr_does_not_block_without_env() {
         let config = config::Config::default();
         assert!(!should_block_nested_for_env(&config, None));
-    }
-
-    #[test]
-    fn inherited_nested_env_does_not_block_a_standalone_console() {
-        let config = config::Config::default();
-        assert!(!should_block_nested_for_launch(
-            &config,
-            Some(HERDR_ENV_VALUE),
-            true
-        ));
-    }
-
-    #[test]
-    fn inherited_nested_env_still_blocks_a_shared_console() {
-        let config = config::Config::default();
-        assert!(should_block_nested_for_launch(
-            &config,
-            Some(HERDR_ENV_VALUE),
-            false
-        ));
     }
 
     #[test]

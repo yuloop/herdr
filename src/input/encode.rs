@@ -16,6 +16,13 @@ pub fn encode_key(key: KeyEvent, protocol: KeyboardProtocol) -> Vec<u8> {
 }
 
 pub fn encode_terminal_key(key: TerminalKey, protocol: KeyboardProtocol) -> Vec<u8> {
+    // A zero Unicode value on this Windows character event means the host layout is
+    // still composing a dead key. Kitty panes must not receive its physical fallback.
+    // Legacy Windows panes take the native ConPTY fallback before reaching this encoder.
+    if matches!(protocol, KeyboardProtocol::Kitty { .. }) && key.is_windows_shift_dead_key() {
+        return Vec::new();
+    }
+
     // REPORT_ALL_KEYS must retain physical press/repeat/release semantics instead of
     // reducing a native key to its layout-generated text.
     let preserve_physical_key = key.has_physical_identity() && protocol.reports_all_keys();

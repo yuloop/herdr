@@ -1412,6 +1412,10 @@ impl Terminal {
         self.get_u16(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_ROWS)
     }
 
+    pub fn cursor_y(&self) -> Result<u16, Error> {
+        self.get_u16(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_Y)
+    }
+
     pub fn effective_foreground_color(&self) -> Result<Option<RgbColor>, Error> {
         self.get_optional_rgb_color(TERMINAL_DATA_COLOR_FOREGROUND)
     }

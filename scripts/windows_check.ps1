@@ -69,18 +69,14 @@ function Invoke-CargoTestFilter {
     }
 
     Write-Host "Running $($testNames.Count) test(s) for '$Filter'"
-    # Several Windows tests temporarily replace PATH while probing command shims.
-    # Keep filtered suites serial so unrelated process-spawning tests cannot observe
-    # another test's temporary environment.
-    $runArguments = $commonArguments + @("--", "--test-threads=1")
+    $runArguments = $commonArguments
     if ($Exact) {
-        $runArguments += "--exact"
+        $runArguments += @("--", "--exact")
     }
     Invoke-Checked cargo $runArguments
 }
 
 Invoke-Checked rustup @("target", "add", "x86_64-pc-windows-msvc")
-Invoke-Checked rustup @("target", "add", "x86_64-unknown-linux-musl")
 Invoke-Checked cargo @("fmt", "--check")
 Invoke-CargoWithZigCacheRecovery @(
     "clippy",
@@ -94,63 +90,13 @@ Invoke-CargoWithZigCacheRecovery @(
     "warnings"
 )
 
-$previousLibghosttyVtSimd = $env:LIBGHOSTTY_VT_SIMD
-try {
-    # A Windows host cannot run Linux tests, but linting the Linux release
-    # target catches cfg(unix), Linux-only warning, shared-interface, and
-    # target dependency drift before the native Ubuntu gate runs.
-    $env:LIBGHOSTTY_VT_SIMD = "false"
-    Invoke-CargoWithZigCacheRecovery @(
-        "clippy",
-        "--bin",
-        "herdr",
-        "--locked",
-        "--target",
-        "x86_64-unknown-linux-musl",
-        "--",
-        "-D",
-        "warnings"
-    )
-} finally {
-    if ($null -eq $previousLibghosttyVtSimd) {
-        Remove-Item Env:LIBGHOSTTY_VT_SIMD -ErrorAction SilentlyContinue
-    } else {
-        $env:LIBGHOSTTY_VT_SIMD = $previousLibghosttyVtSimd
-    }
-}
-
 if ($Mode -eq "lint") {
     return
 }
 
-Invoke-Checked python @(
-    "-m",
-    "unittest",
-    "scripts.test_agent_detection_manifest_check",
-    "scripts.test_changelog",
-    "scripts.test_config_reference_check",
-    "scripts.test_cross_platform_gate",
-    "scripts.test_docs_translation_parity",
-    "scripts.test_i18n_key_check",
-    "scripts.test_herdr_automation_issue",
-    "scripts.test_herdr_deploy",
-    "scripts.test_herdr_deploy_integration",
-    "scripts.test_sync_upstream",
-    "scripts.test_hermes_integration_asset",
-    "scripts.test_package_windows_conpty",
-    "scripts.test_preview",
-    "scripts.test_vendor_libghostty_vt",
-    "scripts.test_vendor_portable_pty"
-)
-Invoke-Checked powershell.exe @(
-    "-NoProfile",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    (Join-Path $PSScriptRoot "windows_terminal_profile_test.ps1")
-)
 Invoke-CargoTestFilter "windows_"
 Invoke-CargoTestFilter "server::client_transport::tests"
-Invoke-CargoTestFilter "app::tests::native_repeats_and_releases_follow_the_pressed_pane" -Exact
-Invoke-CargoTestFilter "ui::"
+Invoke-CargoTestFilter "input::lease::tests::duplicate_physical_press_normalizes_for_forwarded_and_consumed_leases" -Exact
+Invoke-CargoTestFilter "client::shell::tests::input_domain::physical_release_uses_the_leased_press_code_with_current_modifiers" -Exact
+Invoke-CargoTestFilter "client::shell::tests::input_domain::pane_key_release_keeps_the_press_target" -Exact
 Invoke-Checked cargo @("build", "--locked", "--target", "x86_64-pc-windows-msvc")

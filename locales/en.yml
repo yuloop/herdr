@@ -144,6 +144,26 @@ cli:
   plugin_pane_open_about: "Open a plugin pane"
   plugin_pane_focus_about: "Focus a plugin pane"
   plugin_pane_close_about: "Close a plugin pane"
+  agent_prompt_about: "Submit a prompt to an agent"
+  agent_prompt_wait_help: "Wait for the first matching state observed after submission"
+  agent_prompt_until_help: "State to match after --wait; repeat for more than one state"
+  agent_wait_states_about: "Wait until an agent reaches one of the requested states"
+  agent_wait_until_help: "State to match; repeat for more than one state"
+  agent_wait_timeout_help: "Fail after this many milliseconds"
+  agent_start_interactive_about: "Start a supported interactive agent in an existing pane"
+  agent_start_kind_help: "Supported agent kind and canonical executable"
+  agent_start_pane_help: "Existing pane at an interactive shell prompt"
+  agent_start_ready_help: "Wait for interactive readiness (default: 30000; max: 300000)"
+  pane_input_about: "Set pane input routing"
+  pane_match_literal_help: "Match a literal substring"
+  pane_match_regex_help: "Match a Rust regular expression"
+  pane_match_lines_help: "Restrict the searched snapshot to N lines"
+  pane_match_raw_help: "Keep ANSI escape sequences while matching"
+  terminal_control_about: "Control a terminal stream"
+  nested_disabled: "nested herdr is disabled by default."
+  nested_hint: "see configuration if you want to enable it."
+  run_help_for_usage: "run 'herdr --help' for usage"
+  remote_only_default: "--remote can only be used with the default launch command"
 
 # TUI 通用词汇
 common:
@@ -297,6 +317,8 @@ nav:
   tab_label: "tab: %{name}"
   pane_label: "pane %{number}"
   shell: "shell"
+  search_footer: " search type · move ↑↓/ctrl+n/p · open enter · back esc"
+  browse_footer: " move j/k · expand space · filter a/b/w/i/d · search / · open enter · close esc"
 
 # dialog 对话框 (dialogs.rs)
 dialog:
@@ -317,6 +339,7 @@ dialog:
   branch_not_deleted: " The branch is not deleted. The Herdr workspace will close."
   dirty_warning: " Dirty or untracked files will be permanently deleted."
   removing: " removing…"
+  opening: " opening…"
   open_worktree: "open worktree"
   open: "open"
   filter_worktrees: "filter worktrees"
@@ -329,6 +352,21 @@ dialog:
   panes_count: "%{count} panes"
   one_workspace: "1 workspace, "
   workspaces_count: "%{count} workspaces, "
+  worktree_parent_only: "New and open worktree actions start from the repo parent workspace."
+  worktree_not_managed: "This workspace is not a Herdr-managed worktree checkout."
+  branch_required: "branch is required"
+  no_worktrees: "No Git worktrees found for this repo."
+
+# endpoint 端点通知 (shell/actions.rs)
+endpoint:
+  custom_unavailable: "custom command is not available on this endpoint; reload configuration"
+  action_unavailable: "Action unavailable"
+  unsupported_body: "This server does not support %{method} yet. Update and restart it to enable this action."
+  paste_rejected: "Paste rejected"
+  server_timeout: "Server timed out"
+  timeout_body: "This server did not respond to %{method}."
+  server_unavailable: "Server unavailable"
+  action_rejected: "Action rejected"
 
 # settings 设置面板 (settings.rs)
 settings:
@@ -416,6 +454,18 @@ keybind:
   cycle_pane_next: "cycle pane next"
   cycle_pane_previous: "cycle pane previous"
   last_pane: "last pane"
+  keybinds: "keybinds"
+  settings: "settings"
+  detach: "detach"
+  move_tab_left: "move tab left"
+  move_tab_right: "move tab right"
+  resize_pane_left: "resize pane left"
+  resize_pane_down: "resize pane down"
+  resize_pane_up: "resize pane up"
+  resize_pane_right: "resize pane right"
+  no_match: " no matching keybinds"
+  filter_footer: " filter type/backspace · clear ctrl+u · scroll ↑↓/pgup/pgdn · back esc"
+  browse_footer: " search / · scroll j/k/↑↓/pgup/pgdn · close esc/enter"
 
 # release 发布说明 (release_notes.rs)
 release:
@@ -447,6 +497,7 @@ mobile:
   idle_count: "%{count} idle"
   waiting: "%{agent} waiting"
   done: "%{agent} done"
+  no_matching_agents: "no matching agents"
 
 # state label/context menu (app/state.rs)
 state:
@@ -516,3 +567,12 @@ state:
   wt_open: "open"
   wt_detached: "detached"
   wt_root: "root"
+
+# overlay 底部按钮与页脚 (shell/overlays.rs)
+overlay:
+  esc_close: " esc close "
+  esc_back: " esc back "
+  esc_cancel: " esc cancel "
+  confirm_btn: " ↵ confirm "
+  wheel: "wheel ↑↓"
+  esc_enter: " esc / enter "

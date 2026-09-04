@@ -167,6 +167,7 @@ pub(super) struct ShellHitMap {
     pub(super) navigator_rows: Vec<(Rect, usize)>,
     pub(super) worktree_search: Rect,
     pub(super) worktree_rows: Vec<(Rect, usize)>,
+    pub(super) pane_move_rows: Vec<(Rect, usize)>,
     pub(super) help_popup: Rect,
     pub(super) help_scrollbar: Rect,
     pub(super) help_scroll_metrics: Option<crate::pane::ScrollMetrics>,
@@ -321,6 +322,7 @@ pub(super) enum ClientShellOverlayKind {
     WorktreeCreate,
     WorktreeOpen,
     WorktreeRemove,
+    PaneMove,
     ContextMenu,
     GlobalMenu,
     Settings,
@@ -551,6 +553,37 @@ pub(super) struct ClientWorktreeRemoveOverlay {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ClientPaneMoveMode {
+    Move,
+    Reposition,
+    Preset,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum ClientPaneMoveEntry {
+    NewTab,
+    NewWorkspace,
+    ExistingTab {
+        tab_id: String,
+    },
+    Reposition {
+        target_pane_id: String,
+        placement: crate::api::schema::PaneDirection,
+    },
+    Preset {
+        preset: crate::api::schema::PaneLayoutPreset,
+    },
+}
+
+#[derive(Debug)]
+pub(super) struct ClientPaneMoveOverlay {
+    pub(super) source_pane_id: String,
+    pub(super) source_tab_id: String,
+    pub(super) mode: ClientPaneMoveMode,
+    pub(super) selected: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ClientContextMenuAction {
     Rename,
     Close,
@@ -562,6 +595,9 @@ pub(super) enum ClientContextMenuAction {
     RenamePane,
     ClearPaneName,
     SwapWithFocusedPane,
+    MoveOrDetach,
+    RepositionPane,
+    LayoutTemplates,
     SplitRight,
     SplitDown,
     Zoom,
@@ -585,9 +621,12 @@ pub(super) enum ClientContextMenuTarget {
     Pane {
         pane_id: String,
         workspace_id: String,
+        tab_id: String,
         source_pane_id: Option<String>,
         has_manual_label: bool,
         right_click_passthrough: bool,
+        tab_zoomed: bool,
+        same_tab_pane_count: usize,
     },
 }
 
@@ -623,6 +662,7 @@ pub(super) enum ClientShellOverlay {
     WorktreeCreate(ClientWorktreeCreateOverlay),
     WorktreeOpen(ClientWorktreeOpenOverlay),
     WorktreeRemove(ClientWorktreeRemoveOverlay),
+    PaneMove(ClientPaneMoveOverlay),
     ContextMenu(ClientContextMenuOverlay),
     GlobalMenu(ClientGlobalMenuOverlay),
     Settings(ClientSettingsOverlay),
@@ -641,6 +681,7 @@ impl ClientShellOverlay {
             Self::WorktreeCreate(_) => ClientShellOverlayKind::WorktreeCreate,
             Self::WorktreeOpen(_) => ClientShellOverlayKind::WorktreeOpen,
             Self::WorktreeRemove(_) => ClientShellOverlayKind::WorktreeRemove,
+            Self::PaneMove(_) => ClientShellOverlayKind::PaneMove,
             Self::ContextMenu(_) => ClientShellOverlayKind::ContextMenu,
             Self::GlobalMenu(_) => ClientShellOverlayKind::GlobalMenu,
             Self::Settings(_) => ClientShellOverlayKind::Settings,
@@ -1726,6 +1767,7 @@ impl ClientShellState {
                     | ClientShellOverlay::Help(_)
                     | ClientShellOverlay::Navigator(_)
                     | ClientShellOverlay::WorktreeRemove(_)
+                    | ClientShellOverlay::PaneMove(_)
                     | ClientShellOverlay::ContextMenu(_)
                     | ClientShellOverlay::GlobalMenu(_)
             );

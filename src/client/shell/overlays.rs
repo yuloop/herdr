@@ -13,6 +13,7 @@ pub(crate) struct OverlayRender {
     pub(crate) navigator_rows: Vec<(Rect, usize)>,
     pub(crate) worktree_search: Rect,
     pub(crate) worktree_rows: Vec<(Rect, usize)>,
+    pub(crate) pane_move_rows: Vec<(Rect, usize)>,
     pub(crate) help_popup: Rect,
     pub(crate) help_scrollbar: Rect,
     pub(crate) help_scroll_metrics: Option<crate::pane::ScrollMetrics>,
@@ -71,6 +72,7 @@ pub(crate) fn render_client_overlay(
         ClientShellOverlay::WorktreeRemove(v) => {
             worktree_overlays::render_worktree_remove_overlay(b, v, p)
         }
+        ClientShellOverlay::PaneMove(v) => render_pane_move_overlay(b, v, s, p),
         ClientShellOverlay::ContextMenu(_) | ClientShellOverlay::GlobalMenu(_) => None,
     }
 }
@@ -944,6 +946,117 @@ fn render_navigator_overlay(
             visible: true,
             shape: 0,
         }),
+        ..OverlayRender::default()
+    })
+}
+
+fn render_pane_move_overlay(
+    b: &mut Buffer,
+    m: &ClientPaneMoveOverlay,
+    s: &ClientShellSnapshot,
+    p: &Palette,
+) -> Option<OverlayRender> {
+    let a = b.area;
+    let mx = (a.width / 8).max(2);
+    let my = (a.height / 5).max(1);
+    let q = Rect::new(
+        a.x + mx,
+        a.y + my,
+        a.width.saturating_sub(mx * 2).max(30),
+        a.height.saturating_sub(my * 2).max(8),
+    );
+    let i = panel(b, q, p.accent, p.panel_bg)?;
+    let entries = m.entries(s);
+    put_text(
+        b,
+        i.x,
+        i.y,
+        i.width,
+        &format!(" {}", m.title()),
+        Style::default()
+            .fg(p.text)
+            .bg(p.panel_bg)
+            .add_modifier(Modifier::BOLD),
+    );
+    put_right_text(
+        b,
+        i,
+        i.y,
+        &format!("{}", entries.len()),
+        Style::default().fg(p.overlay0).bg(p.panel_bg),
+    );
+    put_text(
+        b,
+        i.x,
+        i.y + 1,
+        i.width,
+        &"─".repeat(i.width as usize),
+        Style::default().fg(p.surface1).bg(p.panel_bg),
+    );
+    let body = Rect::new(i.x, i.y + 2, i.width, i.height.saturating_sub(4));
+    let mut row_hits = Vec::new();
+    if entries.is_empty() {
+        put_text(
+            b,
+            body.x,
+            body.y,
+            body.width,
+            &format!(" {}", rust_i18n::t!("state.pane_move_empty")),
+            Style::default().fg(p.overlay1).bg(p.panel_bg),
+        );
+    } else {
+        let max = entries.len().saturating_sub(body.height as usize);
+        let scroll = max
+            .min(
+                m.selected
+                    .saturating_sub(body.height.saturating_sub(1) as usize),
+            )
+            .min(m.selected);
+        for (vis, (ix, (label, _))) in entries
+            .iter()
+            .enumerate()
+            .skip(scroll)
+            .take(body.height as usize)
+            .enumerate()
+        {
+            let rect = Rect::new(body.x, body.y + vis as u16, body.width, 1);
+            row_hits.push((rect, ix));
+            let st = if ix == m.selected {
+                Style::default()
+                    .fg(contrast(p))
+                    .bg(p.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(p.text).bg(p.panel_bg)
+            };
+            b.set_style(rect, st);
+            let numbered = if ix < 9 {
+                format!(" {}. {}", ix + 1, label)
+            } else {
+                format!("    {}", label)
+            };
+            put_text(b, rect.x, rect.y, rect.width, &numbered, st);
+        }
+    }
+    put_text(
+        b,
+        i.x,
+        i.bottom() - 1,
+        i.width,
+        &m.hint(),
+        Style::default().fg(p.overlay0).bg(p.panel_bg),
+    );
+    Some(OverlayRender {
+        primary: Rect::default(),
+        clear: Rect::default(),
+        cancel: Rect::default(),
+        navigator_popup: q,
+        navigator_search: Rect::default(),
+        navigator_rows: Vec::new(),
+        worktree_search: Rect::default(),
+        worktree_rows: Vec::new(),
+        pane_move_rows: row_hits,
+        cursor: None,
         ..OverlayRender::default()
     })
 }

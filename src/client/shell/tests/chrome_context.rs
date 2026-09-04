@@ -384,3 +384,137 @@ fn close_confirmation_error_becomes_client_owned_overlay_and_stable_group_close(
             if params.workspace_id == "ws_1" && params.close_group
     ));
 }
+
+#[test]
+fn pane_context_menu_shows_move_reposition_and_preset_items() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snap = snapshot();
+    snap.panes.push(ClientShellPane {
+        pane_id: "pane_2".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        label: None,
+        cwd: Some("/repo".into()),
+        foreground_cwd: Some("/repo".into()),
+        focused: false,
+        right_click_passthrough: false,
+    });
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("composed frame");
+    let pane = state.hits.panes[0].rect;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: pane.x + 1,
+        row: pane.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let items = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu.items(),
+        other => panic!("pane context menu, got {other:?}"),
+    };
+    for expected in [
+        ClientContextMenuAction::MoveOrDetach,
+        ClientContextMenuAction::RepositionPane,
+        ClientContextMenuAction::LayoutTemplates,
+    ] {
+        assert!(
+            items.iter().any(|item| item.action == expected),
+            "missing pane menu item {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn pane_move_overlay_move_mode_submits_new_tab() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_pane_move_overlay("pane_1".into(), "tab_1".into(), ClientPaneMoveMode::Move);
+    let mut outcome = ClientShellInput::default();
+    state.submit_pane_move(&mut outcome);
+    let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+        panic!("pane move should use endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneMove(params)
+            if params.pane_id == "pane_1"
+                && matches!(
+                    params.destination,
+                    crate::api::schema::PaneMoveDestination::NewTab { .. }
+                )
+    ));
+    assert!(state.overlay.is_none());
+}
+
+#[test]
+fn pane_move_overlay_reposition_lists_targets_and_submits() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snap = snapshot();
+    snap.panes.push(ClientShellPane {
+        pane_id: "pane_2".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        label: None,
+        cwd: Some("/repo".into()),
+        foreground_cwd: Some("/repo".into()),
+        focused: false,
+        right_click_passthrough: false,
+    });
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    state.open_pane_move_overlay(
+        "pane_1".into(),
+        "tab_1".into(),
+        ClientPaneMoveMode::Reposition,
+    );
+    let count = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::PaneMove(m)) => {
+            let entries = m.entries(state.snapshot.as_deref().expect("snapshot"));
+            assert!(entries.iter().any(|(_, e)| matches!(
+                e,
+                ClientPaneMoveEntry::Reposition { target_pane_id, .. }
+                    if target_pane_id == "pane_2"
+            )));
+            entries.len()
+        }
+        other => panic!("pane move overlay, got {other:?}"),
+    };
+    assert!(count >= 4);
+    let mut outcome = ClientShellInput::default();
+    state.submit_pane_move(&mut outcome);
+    let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+        panic!("reposition should use endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::LayoutRearrange(_)
+    ));
+    assert!(state.overlay.is_none());
+}
+
+#[test]
+fn pane_move_overlay_preset_mode_submits_preset() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_pane_move_overlay("pane_1".into(), "tab_1".into(), ClientPaneMoveMode::Preset);
+    let count = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::PaneMove(m)) => m
+            .entries(state.snapshot.as_deref().expect("snapshot"))
+            .len(),
+        other => panic!("pane move overlay, got {other:?}"),
+    };
+    assert_eq!(count, 5);
+    let mut outcome = ClientShellInput::default();
+    state.submit_pane_move(&mut outcome);
+    let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+        panic!("preset should use endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::LayoutRearrange(_)
+    ));
+    assert!(state.overlay.is_none());
+}

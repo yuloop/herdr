@@ -1347,6 +1347,66 @@ impl ClientShellState {
             }
             return;
         }
+        if matches!(self.overlay, Some(ClientShellOverlay::PaneMove(_))) {
+            match mouse.kind {
+                MouseEventKind::Moved => {
+                    if let (Some((_, index)), Some(ClientShellOverlay::PaneMove(pane_move))) = (
+                        self.hits
+                            .pane_move_rows
+                            .iter()
+                            .find(|(rect, _)| super::contains(*rect, point))
+                            .copied(),
+                        self.overlay.as_mut(),
+                    ) {
+                        pane_move.selected = index;
+                        outcome.repaint = true;
+                    }
+                }
+                MouseEventKind::ScrollUp => {
+                    self.move_pane_move_selection_clamped(-1);
+                    outcome.repaint = true;
+                }
+                MouseEventKind::ScrollDown => {
+                    self.move_pane_move_selection_clamped(1);
+                    outcome.repaint = true;
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some((_, index)) = self
+                        .hits
+                        .pane_move_rows
+                        .iter()
+                        .find(|(rect, _)| super::contains(*rect, point))
+                        .copied()
+                    {
+                        if let Some(ClientShellOverlay::PaneMove(pane_move)) = self.overlay.as_mut()
+                        {
+                            pane_move.selected = index;
+                        }
+                        self.submit_pane_move(outcome);
+                    } else if !super::contains(self.hits.navigator_popup, point) {
+                        self.overlay = None;
+                        outcome.repaint = true;
+                    } else {
+                        let empty = self
+                            .snapshot
+                            .as_deref()
+                            .zip(self.overlay.as_ref())
+                            .map(|(snapshot, overlay)| match overlay {
+                                ClientShellOverlay::PaneMove(pane_move) => {
+                                    pane_move.entry_count(snapshot) == 0
+                                }
+                                _ => false,
+                            })
+                            .unwrap_or(false);
+                        if empty {
+                            self.submit_pane_move(outcome);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
         if matches!(
             self.overlay,
             Some(

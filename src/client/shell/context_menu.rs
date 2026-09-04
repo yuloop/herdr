@@ -73,6 +73,8 @@ impl ClientContextMenuOverlay {
                 source_pane_id,
                 has_manual_label,
                 right_click_passthrough,
+                tab_zoomed,
+                same_tab_pane_count,
                 ..
             } => {
                 let mut items = vec![item(
@@ -91,15 +93,31 @@ impl ClientContextMenuOverlay {
                         Action::SwapWithFocusedPane,
                     ));
                 }
+                if !tab_zoomed {
+                    items.push(item(
+                        t!("state.ctx_move_or_detach").to_string(),
+                        Action::MoveOrDetach,
+                    ));
+                    if *same_tab_pane_count >= 2 {
+                        items.push(item(
+                            t!("state.ctx_reposition_pane").to_string(),
+                            Action::RepositionPane,
+                        ));
+                        items.push(item(
+                            t!("state.ctx_layout_templates").to_string(),
+                            Action::LayoutTemplates,
+                        ));
+                    }
+                }
                 items.extend([
                     item(t!("state.ctx_split_right").to_string(), Action::SplitRight),
                     item(t!("state.ctx_split_down").to_string(), Action::SplitDown),
                     item(t!("state.ctx_zoom").to_string(), Action::Zoom),
                     item(
                         if *right_click_passthrough {
-                            "Use Herdr right-click menu".to_string()
+                            t!("state.ctx_use_herdr_menu").to_string()
                         } else {
-                            "Send right-clicks to pane".to_string()
+                            t!("state.ctx_send_to_pane").to_string()
                         },
                         Action::ToggleRightClickPassthrough,
                     ),
@@ -184,13 +202,26 @@ impl ClientShellState {
             .focused_pane_id
             .clone()
             .filter(|focused| focused != &pane_id);
+        let tab_zoomed = snapshot
+            .tabs
+            .iter()
+            .find(|tab| tab.tab_id == pane.tab_id)
+            .is_some_and(|tab| tab.zoomed);
+        let same_tab_pane_count = snapshot
+            .panes
+            .iter()
+            .filter(|candidate| candidate.tab_id == pane.tab_id)
+            .count();
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::Pane {
                 pane_id,
                 workspace_id: pane.workspace_id.clone(),
+                tab_id: pane.tab_id.clone(),
                 source_pane_id,
                 has_manual_label: pane.label.is_some(),
                 right_click_passthrough: pane.right_click_passthrough,
+                tab_zoomed,
+                same_tab_pane_count,
             },
             x,
             y,
@@ -233,12 +264,14 @@ impl ClientShellState {
             ClientContextMenuTarget::Pane {
                 pane_id,
                 workspace_id,
+                tab_id,
                 source_pane_id,
                 right_click_passthrough,
                 ..
             } => self.activate_pane_context_action(
                 pane_id,
                 workspace_id,
+                tab_id,
                 source_pane_id,
                 right_click_passthrough,
                 action,
@@ -403,6 +436,7 @@ impl ClientShellState {
         &mut self,
         pane_id: String,
         workspace_id: String,
+        source_tab_id: String,
         source_pane_id: Option<String>,
         right_click_passthrough: bool,
         action: ClientContextMenuAction,
@@ -481,6 +515,17 @@ impl ClientShellState {
                 }),
                 outcome,
             ),
+            ClientContextMenuAction::MoveOrDetach
+            | ClientContextMenuAction::RepositionPane
+            | ClientContextMenuAction::LayoutTemplates => {
+                let mode = match action {
+                    ClientContextMenuAction::RepositionPane => ClientPaneMoveMode::Reposition,
+                    ClientContextMenuAction::LayoutTemplates => ClientPaneMoveMode::Preset,
+                    _ => ClientPaneMoveMode::Move,
+                };
+                self.open_pane_move_overlay(pane_id, source_tab_id, mode);
+                outcome.repaint = true;
+            }
             ClientContextMenuAction::ToggleRightClickPassthrough => self.push_endpoint_method(
                 Method::PaneInputSet(PaneInputSetParams {
                     pane_id,

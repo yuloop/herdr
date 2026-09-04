@@ -63,7 +63,7 @@ pub(super) fn render_mode_bar(
     let mut segments = Vec::<(String, Style)>::new();
     if let Some(error) = endpoint_error {
         segments.extend([
-            (" ERROR ".to_owned(), mode_style),
+            (rust_i18n::t!("menu.error_label").to_string(), mode_style),
             (format!(" {error}"), base),
         ]);
     } else {

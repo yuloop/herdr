@@ -6,13 +6,12 @@ impl ClientPaneMoveOverlay {
         snapshot: &ClientShellSnapshot,
     ) -> Vec<(String, ClientPaneMoveEntry)> {
         match self.mode {
-            ClientPaneMoveMode::Move => self.move_entries(snapshot),
             ClientPaneMoveMode::Reposition => self.reposition_entries(snapshot),
             ClientPaneMoveMode::Preset => Self::preset_entries(),
         }
     }
 
-    fn move_entries(&self, snapshot: &ClientShellSnapshot) -> Vec<(String, ClientPaneMoveEntry)> {
+    fn detach_entries(&self, snapshot: &ClientShellSnapshot) -> Vec<(String, ClientPaneMoveEntry)> {
         let other_tabs = snapshot
             .tabs
             .iter()
@@ -131,13 +130,14 @@ impl ClientPaneMoveOverlay {
         &self,
         snapshot: &ClientShellSnapshot,
     ) -> Vec<(String, ClientPaneMoveEntry)> {
+        let mut entries = self.detach_entries(snapshot);
         let mut targets: Vec<_> = snapshot
             .panes
             .iter()
             .filter(|pane| pane.tab_id == self.source_tab_id && pane.pane_id != self.source_pane_id)
             .collect();
         targets.sort_by_key(|pane| pane.pane_id.clone());
-        let mut entries = Vec::with_capacity(targets.len());
+        entries.reserve(targets.len());
         for target in targets {
             let pane_label = Self::pane_display_name(snapshot, target);
             let dir = rust_i18n::t!("state.pane_dir_right").to_string();
@@ -189,7 +189,6 @@ impl ClientPaneMoveOverlay {
 
     pub(super) fn title(&self) -> String {
         match self.mode {
-            ClientPaneMoveMode::Move => rust_i18n::t!("state.pane_transfer_title").to_string(),
             ClientPaneMoveMode::Reposition => rust_i18n::t!("state.layout_move_title").to_string(),
             ClientPaneMoveMode::Preset => rust_i18n::t!("state.layout_templates_title").to_string(),
         }
@@ -197,20 +196,20 @@ impl ClientPaneMoveOverlay {
 
     pub(super) fn entry_count(&self, snapshot: &ClientShellSnapshot) -> usize {
         match self.mode {
-            ClientPaneMoveMode::Move => {
+            ClientPaneMoveMode::Reposition => {
                 2 + snapshot
                     .tabs
                     .iter()
                     .filter(|tab| tab.tab_id != self.source_tab_id)
                     .count()
+                    + snapshot
+                        .panes
+                        .iter()
+                        .filter(|pane| {
+                            pane.tab_id == self.source_tab_id && pane.pane_id != self.source_pane_id
+                        })
+                        .count()
             }
-            ClientPaneMoveMode::Reposition => snapshot
-                .panes
-                .iter()
-                .filter(|pane| {
-                    pane.tab_id == self.source_tab_id && pane.pane_id != self.source_pane_id
-                })
-                .count(),
             ClientPaneMoveMode::Preset => 5,
         }
     }

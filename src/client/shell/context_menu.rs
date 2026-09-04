@@ -95,14 +95,10 @@ impl ClientContextMenuOverlay {
                 }
                 if !tab_zoomed {
                     items.push(item(
-                        t!("state.ctx_move_or_detach").to_string(),
-                        Action::MoveOrDetach,
+                        t!("state.ctx_reposition_pane").to_string(),
+                        Action::RepositionPane,
                     ));
                     if *same_tab_pane_count >= 2 {
-                        items.push(item(
-                            t!("state.ctx_reposition_pane").to_string(),
-                            Action::RepositionPane,
-                        ));
                         items.push(item(
                             t!("state.ctx_layout_templates").to_string(),
                             Action::LayoutTemplates,
@@ -515,13 +511,10 @@ impl ClientShellState {
                 }),
                 outcome,
             ),
-            ClientContextMenuAction::MoveOrDetach
-            | ClientContextMenuAction::RepositionPane
-            | ClientContextMenuAction::LayoutTemplates => {
+            ClientContextMenuAction::RepositionPane | ClientContextMenuAction::LayoutTemplates => {
                 let mode = match action {
-                    ClientContextMenuAction::RepositionPane => ClientPaneMoveMode::Reposition,
                     ClientContextMenuAction::LayoutTemplates => ClientPaneMoveMode::Preset,
-                    _ => ClientPaneMoveMode::Move,
+                    _ => ClientPaneMoveMode::Reposition,
                 };
                 self.open_pane_move_overlay(pane_id, source_tab_id, mode);
                 outcome.repaint = true;

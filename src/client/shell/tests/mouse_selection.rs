@@ -232,7 +232,10 @@ fn disabled_mouse_chrome_keeps_tab_wheel_but_removes_split_drag_hits() {
 
 #[test]
 fn client_double_click_selects_and_copies_endpoint_row_word() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut config = Config::default();
+    // 自动复制链路测试：显式切自动挡（fork 默认手动挡不会自动复制单词）。
+    config.ui.copy_on_select = crate::config::CopyOnSelectModeConfig::Clipboard;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     state.compose(106, 20).expect("composed frame");

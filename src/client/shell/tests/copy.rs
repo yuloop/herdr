@@ -53,7 +53,10 @@ fn pasted_help_and_copy_queries_strip_control_characters() {
 
 #[test]
 fn client_mouse_selection_highlights_and_copies_through_endpoint_extraction() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut config = Config::default();
+    // 自动复制链路测试：显式切自动挡（fork 默认手动挡不会自动清选区）。
+    config.ui.copy_on_select = crate::config::CopyOnSelectModeConfig::Clipboard;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     state.compose(106, 20).expect("composed frame");

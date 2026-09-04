@@ -518,3 +518,64 @@ fn pane_move_overlay_preset_mode_submits_preset() {
     ));
     assert!(state.overlay.is_none());
 }
+
+#[test]
+fn pane_move_reposition_labels_show_project_and_agent() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snap = snapshot();
+    snap.workspaces[0].label = "myproj".into();
+    snap.panes.push(ClientShellPane {
+        pane_id: "w9:pB".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        label: None,
+        cwd: Some("/repo".into()),
+        foreground_cwd: Some("/repo".into()),
+        focused: false,
+        right_click_passthrough: false,
+    });
+    snap.agents.push(crate::protocol::ClientShellAgent {
+        pane_id: "w9:pB".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: None,
+        display_agent: Some("Claude".into()),
+        agent: Some("claude".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 0,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+    });
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    state.open_pane_move_overlay(
+        "pane_1".into(),
+        "tab_1".into(),
+        ClientPaneMoveMode::Reposition,
+    );
+    let entries = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::PaneMove(m)) => {
+            m.entries(state.snapshot.as_deref().expect("snapshot"))
+        }
+        other => panic!("pane move overlay, got {other:?}"),
+    };
+    assert!(!entries.is_empty());
+    for (label, _) in &entries {
+        assert!(
+            label.contains("myproj"),
+            "reposition label should show project name, got {label}"
+        );
+        assert!(
+            label.contains("Claude"),
+            "reposition label should show agent name, got {label}"
+        );
+        assert!(
+            !label.contains("w9:pB"),
+            "reposition label should not show raw pane id, got {label}"
+        );
+    }
+}

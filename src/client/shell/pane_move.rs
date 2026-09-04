@@ -67,6 +67,66 @@ impl ClientPaneMoveOverlay {
         entries
     }
 
+    fn pane_display_name(
+        snapshot: &ClientShellSnapshot,
+        pane: &crate::protocol::ClientShellPane,
+    ) -> String {
+        let workspace_label = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_id == pane.workspace_id)
+            .map(|workspace| workspace.label.clone())
+            .unwrap_or_else(|| pane.workspace_id.clone());
+        let agent_name = snapshot
+            .agents
+            .iter()
+            .find(|agent| agent.pane_id == pane.pane_id)
+            .and_then(|agent| {
+                agent
+                    .display_agent
+                    .clone()
+                    .or_else(|| agent.agent.clone())
+                    .or_else(|| agent.name.clone())
+                    .or_else(|| agent.title.clone())
+                    .or_else(|| agent.terminal_title_stripped.clone())
+            })
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty());
+        let short_id = pane
+            .pane_id
+            .rsplit(':')
+            .next()
+            .unwrap_or(pane.pane_id.as_str());
+        let core = pane
+            .label
+            .clone()
+            .map(|label| label.trim().to_string())
+            .filter(|label| !label.is_empty())
+            .unwrap_or_else(|| short_id.to_string());
+        match agent_name {
+            Some(agent) if core != agent => {
+                format!("{workspace_label} · {agent} · {core}")
+            }
+            Some(agent) => format!("{workspace_label} · {agent}"),
+            None => {
+                let cwd_base = pane
+                    .foreground_cwd
+                    .clone()
+                    .or_else(|| pane.cwd.clone())
+                    .and_then(|cwd| {
+                        cwd.rsplit('/')
+                            .next()
+                            .map(|base| base.trim().to_string())
+                            .filter(|base| !base.is_empty() && *base != core)
+                    });
+                match cwd_base {
+                    Some(base) => format!("{workspace_label} · {core} · {base}"),
+                    None => format!("{workspace_label} · {core}"),
+                }
+            }
+        }
+    }
+
     fn reposition_entries(
         &self,
         snapshot: &ClientShellSnapshot,
@@ -79,10 +139,7 @@ impl ClientPaneMoveOverlay {
         targets.sort_by_key(|pane| pane.pane_id.clone());
         let mut entries = Vec::with_capacity(targets.len() * 4);
         for target in targets {
-            let pane_label = target
-                .label
-                .clone()
-                .unwrap_or_else(|| target.pane_id.clone());
+            let pane_label = Self::pane_display_name(snapshot, target);
             for placement in [
                 crate::api::schema::PaneDirection::Right,
                 crate::api::schema::PaneDirection::Down,

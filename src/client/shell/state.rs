@@ -554,7 +554,6 @@ pub(super) struct ClientWorktreeRemoveOverlay {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ClientPaneMoveMode {
-    Move,
     Reposition,
     Preset,
 }
@@ -595,7 +594,6 @@ pub(super) enum ClientContextMenuAction {
     RenamePane,
     ClearPaneName,
     SwapWithFocusedPane,
-    MoveOrDetach,
     RepositionPane,
     LayoutTemplates,
     SplitRight,

@@ -414,7 +414,6 @@ fn pane_context_menu_shows_move_reposition_and_preset_items() {
         other => panic!("pane context menu, got {other:?}"),
     };
     for expected in [
-        ClientContextMenuAction::MoveOrDetach,
         ClientContextMenuAction::RepositionPane,
         ClientContextMenuAction::LayoutTemplates,
     ] {
@@ -423,14 +422,33 @@ fn pane_context_menu_shows_move_reposition_and_preset_items() {
             "missing pane menu item {expected:?}"
         );
     }
+    assert!(
+        !items
+            .iter()
+            .any(|item| item.label.contains("脱离") || item.label.contains("detach")),
+        "redundant move-or-detach item should be gone"
+    );
 }
 
 #[test]
-fn pane_move_overlay_move_mode_submits_new_tab() {
+fn pane_move_overlay_reposition_lists_detach_first() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
-    state.open_pane_move_overlay("pane_1".into(), "tab_1".into(), ClientPaneMoveMode::Move);
+    state.open_pane_move_overlay(
+        "pane_1".into(),
+        "tab_1".into(),
+        ClientPaneMoveMode::Reposition,
+    );
+    let entries = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::PaneMove(m)) => {
+            m.entries(state.snapshot.as_deref().expect("snapshot"))
+        }
+        other => panic!("pane move overlay, got {other:?}"),
+    };
+    assert!(entries.len() >= 2);
+    assert!(matches!(entries[0].1, ClientPaneMoveEntry::NewTab));
+    assert!(matches!(entries[1].1, ClientPaneMoveEntry::NewWorkspace));
     let mut outcome = ClientShellInput::default();
     state.submit_pane_move(&mut outcome);
     let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
@@ -472,16 +490,29 @@ fn pane_move_overlay_reposition_lists_targets_and_submits() {
     let count = match state.overlay.as_ref() {
         Some(ClientShellOverlay::PaneMove(m)) => {
             let entries = m.entries(state.snapshot.as_deref().expect("snapshot"));
+            assert!(matches!(entries[0].1, ClientPaneMoveEntry::NewTab));
+            assert!(matches!(entries[1].1, ClientPaneMoveEntry::NewWorkspace));
             assert!(entries.iter().any(|(_, e)| matches!(
                 e,
                 ClientPaneMoveEntry::Reposition { target_pane_id, .. }
                     if target_pane_id == "pane_2"
             )));
+            assert!(entries
+                .iter()
+                .filter(|(_, e)| matches!(e, ClientPaneMoveEntry::Reposition { .. }))
+                .all(|(_, e)| matches!(
+                    e,
+                    ClientPaneMoveEntry::Reposition { placement, .. }
+                        if *placement == crate::api::schema::PaneDirection::Right
+                )));
             entries.len()
         }
         other => panic!("pane move overlay, got {other:?}"),
     };
-    assert!(count >= 4);
+    assert_eq!(count, 3);
+    if let Some(ClientShellOverlay::PaneMove(m)) = state.overlay.as_mut() {
+        m.selected = 2;
+    }
     let mut outcome = ClientShellInput::default();
     state.submit_pane_move(&mut outcome);
     let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
@@ -564,7 +595,13 @@ fn pane_move_reposition_labels_show_project_and_agent() {
         other => panic!("pane move overlay, got {other:?}"),
     };
     assert!(!entries.is_empty());
-    for (label, _) in &entries {
+    let reposition_labels: Vec<_> = entries
+        .iter()
+        .filter(|(_, e)| matches!(e, ClientPaneMoveEntry::Reposition { .. }))
+        .map(|(label, _)| label)
+        .collect();
+    assert!(!reposition_labels.is_empty());
+    for label in reposition_labels {
         assert!(
             label.contains("myproj"),
             "reposition label should show project name, got {label}"

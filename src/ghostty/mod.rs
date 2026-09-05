@@ -175,6 +175,8 @@ pub const MOUSE_BUTTON_WHEEL_RIGHT: ffi::GhosttyMouseButton =
     ffi::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_SEVEN;
 pub const MOUSE_FORMAT_SGR: ffi::GhosttyMouseFormat =
     ffi::GhosttyMouseFormat_GHOSTTY_MOUSE_FORMAT_SGR;
+pub const MOUSE_FORMAT_SGR_PIXELS: ffi::GhosttyMouseFormat =
+    ffi::GhosttyMouseFormat_GHOSTTY_MOUSE_FORMAT_SGR_PIXELS;
 
 pub const MODE_APPLICATION_CURSOR_KEYS: u16 = 1;
 pub const MODE_FOCUS_EVENT: u16 = 1004;

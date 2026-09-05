@@ -3885,6 +3885,48 @@ fn client_pane_pixel_mouse_uses_runtime_pixel_encoding() {
 }
 
 #[test]
+fn client_pane_pixel_mouse_stays_pixel_scaled_when_sgr_is_reasserted() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    let _runtime_guard = rt.enter();
+    let (runtime, mut input_rx) =
+        crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+            80,
+            24,
+            0,
+            b"\x1b[?1003h\x1b[?1006h\x1b[?1016h\x1b[?1006h",
+            4,
+        );
+    runtime.resize(24, 80, 10, 20);
+
+    apply_client_pane_input_events(
+        &runtime,
+        &[crate::protocol::ClientPaneInputEvent::Mouse {
+            kind: crate::protocol::ClientMouseKind::Down(crate::protocol::ClientMouseButton::Left),
+            position: crate::protocol::ClientMousePosition::Pixels {
+                x: 403,
+                y: 240,
+                column: 40,
+                row: 12,
+            },
+            geometry: None,
+            modifiers: 0,
+            lines: 1,
+        }],
+    )
+    .expect("pixel mouse input");
+    assert_eq!(
+        input_rx.try_recv().expect("encoded pixel mouse"),
+        Bytes::from_static(b"\x1b[<0;403;240M")
+    );
+    drop(runtime);
+    drop(_runtime_guard);
+    rt.shutdown_timeout(Duration::from_millis(100));
+}
+
+#[test]
 fn client_pane_pixel_mouse_falls_back_to_canonical_cell_position() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

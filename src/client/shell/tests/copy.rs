@@ -769,22 +769,22 @@ fn navigator_owns_search_mouse_selection_and_stable_target_focus() {
     state.handle_input_bytes(b"\x1b");
     state.handle_input_bytes(b"a");
     state.compose(106, 30).expect("navigator rows");
-    let pane_index = {
-        let snapshot = state.snapshot.as_deref().expect("snapshot");
+    let pane_target = {
         let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
         else {
             panic!("expected navigator");
         };
-        render::client_navigator_rows(snapshot, navigator)
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator)
             .iter()
-            .position(|row| matches!(row.target, ClientNavigatorTarget::Pane(_)))
+            .find(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. }))
+            .map(|row| row.target.clone())
             .expect("pane row")
     };
     let pane_rect = state
         .hits
         .navigator_rows
         .iter()
-        .find(|(_, index)| *index == pane_index)
+        .find(|(_, target)| *target == pane_target)
         .map(|(rect, _)| *rect)
         .expect("visible pane row");
     let select =

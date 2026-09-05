@@ -3,6 +3,9 @@ use std::io::Write;
 use clap::{Arg, ArgAction, ArgGroup, Command, ValueHint};
 use rust_i18n::t;
 
+mod completion;
+mod machine;
+
 pub(super) fn command() -> Command {
     let command = Command::new("herdr")
         .about(t!("cli.herdr_about").to_string())
@@ -27,11 +30,12 @@ pub(super) fn command() -> Command {
                 .action(ArgAction::SetTrue)
                 .help(t!("cli.version_help").to_string()),
         )
-        .subcommand(completion_command())
+        .subcommand(completion::command())
         .subcommand(update_command())
         .subcommand(status_command())
         .subcommand(config_command())
         .subcommand(channel_command())
+        .subcommand(machine::command())
         .subcommand(server_command())
         .subcommand(api_command())
         .subcommand(workspace_command())

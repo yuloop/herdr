@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "pane_graphics.rs"]
 mod pane_graphics_tests;
+#[path = "surface_interest.rs"]
+mod surface_interest_tests;
 
 fn client_shell_snapshot(message: ServerMessage) -> Box<crate::protocol::ClientShellSnapshot> {
     let ServerMessage::EndpointControl { kind, data } = message else {
@@ -607,6 +609,7 @@ async fn client_shell_attach_seeds_workspace() {
             direct_graphics: false,
             endpoint_keybindings: false,
             mouse_capture: false,
+            surface_active: true,
             writer,
         })
     );
@@ -636,6 +639,7 @@ async fn client_shell_endpoint_request_uses_the_selected_connection() {
             direct_graphics: false,
             endpoint_keybindings: false,
             mouse_capture: false,
+            surface_active: true,
             writer,
         })
     );
@@ -653,6 +657,26 @@ async fn client_shell_endpoint_request_uses_the_selected_connection() {
         })
     );
     assert!(server.clients[&client_id].shell_endpoint_command_in_flight);
+
+    assert!(
+        !server.handle_server_event(ServerEvent::ClientShellEndpointRequest {
+            client_id,
+            boot_id: boot_id.clone(),
+            request: Box::new(api::schema::Request {
+                id: "client-shell:busy".into(),
+                method: api::schema::Method::IntegrationList(api::schema::EmptyParams::default()),
+            }),
+        })
+    );
+    assert!(server.clients.contains_key(&client_id));
+    let ServerMessage::ClientShellEndpointResponseChunk { data, .. } =
+        read_server_message(control_rx.recv().expect("busy endpoint response"))
+    else {
+        panic!("expected busy endpoint response");
+    };
+    let response =
+        serde_json::from_slice::<api::schema::ErrorResponse>(&data).expect("typed busy response");
+    assert_eq!(response.error.code, "endpoint_busy");
 
     let response_ready = server
         .server_event_rx
@@ -751,6 +775,7 @@ async fn client_shell_receives_metadata_then_shell_free_pane_surface() {
             direct_graphics: false,
             endpoint_keybindings: false,
             mouse_capture: false,
+            surface_active: true,
             writer,
         })
     );
@@ -894,6 +919,7 @@ fn connect_test_shell(
             direct_graphics: false,
             endpoint_keybindings: false,
             mouse_capture: false,
+            surface_active: true,
             writer,
         })
     );
@@ -1219,6 +1245,7 @@ async fn client_shell_config_diagnostics_follow_keybinding_ownership() {
             direct_graphics: false,
             endpoint_keybindings: false,
             mouse_capture: false,
+            surface_active: true,
             writer: local_writer,
         })
     );
@@ -1242,6 +1269,7 @@ async fn client_shell_config_diagnostics_follow_keybinding_ownership() {
             direct_graphics: false,
             endpoint_keybindings: true,
             mouse_capture: false,
+            surface_active: true,
             writer: endpoint_writer,
         })
     );
@@ -1351,6 +1379,12 @@ async fn deferred_worktree_response_moves_only_its_source_client() {
         .get_mut(&51)
         .unwrap()
         .shell_endpoint_command_in_flight = true;
+    let source_surface_revision = server.clients[&51].shell_projection_revision;
+    server
+        .clients
+        .get_mut(&51)
+        .unwrap()
+        .shell_endpoint_command_surface_revision = Some(source_surface_revision);
     server
         .clients
         .get_mut(&51)
@@ -1385,6 +1419,11 @@ async fn deferred_worktree_response_moves_only_its_source_client() {
     );
 
     assert!(server.focus_shell_client_on_tab(51, &original_tab_id));
+    // A source command begun in the old presentation epoch may finish after source-off and
+    // source-on rollback. Its response remains endpoint-local, but it must not apply deferred
+    // client navigation to the restored source.
+    assert!(server.set_client_shell_surface_active(51, false).is_some());
+    assert!(server.set_client_shell_surface_active(51, true).is_some());
     server
         .clients
         .get_mut(&51)
@@ -1394,7 +1433,17 @@ async fn deferred_worktree_response_moves_only_its_source_client() {
         .clients
         .get_mut(&51)
         .unwrap()
+        .shell_endpoint_command_surface_revision = Some(source_surface_revision);
+    server
+        .clients
+        .get_mut(&51)
+        .unwrap()
         .shell_deferred_navigation_request_id = Some("background-worktree".into());
+    server
+        .clients
+        .get_mut(&51)
+        .unwrap()
+        .shell_deferred_navigation_response = Some(Vec::new());
     assert!(
         !server.handle_server_event(ServerEvent::ClientShellEndpointResponseChunkReady {
             client_id: 51,
@@ -1919,6 +1968,7 @@ async fn public_api_focus_replaces_every_client_shell_projection() {
             direct_graphics: false,
             endpoint_keybindings: false,
             mouse_capture: false,
+            surface_active: true,
             writer,
         })
     );
@@ -2168,6 +2218,7 @@ async fn client_shell_streams_and_targets_popup_terminal_content() {
             direct_graphics: false,
             endpoint_keybindings: false,
             mouse_capture: false,
+            surface_active: true,
             writer,
         })
     );
@@ -2664,6 +2715,19 @@ fn retained_test_server(
     std::sync::mpsc::Receiver<Vec<u8>>,
     crate::layout::PaneId,
 ) {
+    let (server, _control_rx, render_rx, pane_id) =
+        retained_test_server_with_control(initial_screen);
+    (server, render_rx, pane_id)
+}
+
+fn retained_test_server_with_control(
+    initial_screen: &[u8],
+) -> (
+    HeadlessServer,
+    std::sync::mpsc::Receiver<Vec<u8>>,
+    std::sync::mpsc::Receiver<Vec<u8>>,
+    crate::layout::PaneId,
+) {
     let mut server = test_headless_server();
     let mut workspace = crate::workspace::Workspace::test_new("test");
     let pane_id = workspace.focused_pane_id().expect("focused pane");
@@ -2676,7 +2740,7 @@ fn retained_test_server(
     server.app.state.selected = 0;
     server.app.state.mode = crate::app::Mode::Terminal;
 
-    let (client_tx, _client_control_rx, client_rx) = test_client_writer();
+    let (client_tx, client_control_rx, client_rx) = test_client_writer();
     server.clients.insert(
         1,
         ClientConnection::new(
@@ -2691,7 +2755,7 @@ fn retained_test_server(
     server.sync_foreground_client_state();
     assert!(server.claim_unowned_shell_tab_geometry(1, true));
 
-    (server, client_rx, pane_id)
+    (server, client_control_rx, client_rx, pane_id)
 }
 
 #[test]

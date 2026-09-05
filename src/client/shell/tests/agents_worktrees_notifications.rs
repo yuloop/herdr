@@ -966,9 +966,7 @@ fn worktree_create_previews_the_endpoint_owned_checkout_path() {
         &state.overlay,
         Some(ClientShellOverlay::WorktreeCreate(create))
             if create.checkout_path
-                == std::path::Path::new("/tmp/herdr-worktrees")
-                    .join("repo")
-                    .join("feature-client-shell").to_string_lossy()
+                == "/tmp/herdr-worktrees/repo/feature-client-shell"
     ));
     let submit = state.handle_input_bytes(b"\r");
     let [ClientShellAction::Endpoint { request, .. }] = &submit.actions[..] else {
@@ -1154,6 +1152,7 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
     state.set_pane_surface(surface());
     let now = std::time::Instant::now();
     let (effects, repaint) = state.receive_notification(
+        &ClientEndpointId::Local,
         SemanticNotification {
             kind: SemanticNotificationKind::NeedsAttention,
             title: "codex needs attention".into(),
@@ -1215,6 +1214,7 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
     assert!(state.visible_notification.is_none());
 
     state.receive_notification(
+        &ClientEndpointId::Local,
         SemanticNotification {
             kind: SemanticNotificationKind::NeedsAttention,
             title: "codex needs attention".into(),
@@ -1245,6 +1245,7 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
     assert!(state.visible_notification.is_none());
 
     state.receive_notification(
+        &ClientEndpointId::Local,
         SemanticNotification {
             kind: SemanticNotificationKind::NeedsAttention,
             title: "first".into(),
@@ -1261,6 +1262,7 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
     assert!(state.visible_notification.is_some());
     state.config.toast_delay_seconds = 1;
     let (_, repaint) = state.receive_notification(
+        &ClientEndpointId::Local,
         SemanticNotification {
             kind: SemanticNotificationKind::NeedsAttention,
             title: "replacement".into(),

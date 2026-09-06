@@ -594,6 +594,34 @@ fn mobile_items(
 ) -> Vec<MobileItem> {
     let palette = &config.palette;
     let mut items = Vec::new();
+    if endpoints.len() > 1 {
+        items.push(MobileItem::section("machines", palette));
+        for endpoint in endpoints {
+            let background = palette.panel_bg;
+            let (symbol, state, color) = endpoint_status_presentation(endpoint.status, palette);
+            items.push(MobileItem {
+                lines: vec![
+                    Line::from(vec![
+                        Span::styled("  ", Style::default().bg(background)),
+                        Span::styled(symbol, Style::default().fg(color).bg(background)),
+                        Span::styled(
+                            format!(" {}", endpoint.label),
+                            Style::default()
+                                .fg(palette.text)
+                                .bg(background)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]),
+                    Line::from(Span::styled(
+                        format!("    {state}"),
+                        Style::default().fg(palette.overlay0).bg(background),
+                    )),
+                ],
+                background,
+                target: Some(ClientMobileTarget::Machine(endpoint.endpoint_id.clone())),
+            });
+        }
+    }
     let agents =
         super::aggregate_navigation::aggregate_agent_rows(endpoints, config.agent_panel_sort);
     if !agents.is_empty() || snapshot.agent_view_label.is_some() {

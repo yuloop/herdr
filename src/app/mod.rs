@@ -1829,6 +1829,26 @@ mod tests {
         );
         assert_eq!(app.state.sidebar_spaces.row_gap, 3);
 
+        let conditional = "[ui.sidebar.agents]\nrows = [[{ token = '$load', rules = [{ gt = 80, bold = true }] }]]\n";
+        std::fs::write(&path, conditional).unwrap();
+        assert_eq!(
+            app.reload_config().status,
+            crate::config::ConfigReloadStatus::Applied
+        );
+        assert_eq!(
+            app.state.sidebar_agents.rows[0][0]
+                .style_for_value("90")
+                .bold,
+            Some(true)
+        );
+        let previous = app.state.sidebar_agents.clone();
+        std::fs::write(&path, conditional.replace("gt = 80", "gt = 'invalid'")).unwrap();
+        assert_eq!(
+            app.reload_config().status,
+            crate::config::ConfigReloadStatus::Partial
+        );
+        assert_eq!(app.state.sidebar_agents, previous);
+
         let previous_agents = app.state.sidebar_agents.clone();
         std::fs::write(
             &path,

@@ -656,7 +656,8 @@ fn auto_detect_respects_nested_guard_before_auto_attach() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("nested herdr is disabled by default"),
+        stderr.contains("nested herdr is disabled by default")
+            || stderr.contains("默认禁用嵌套 herdr"),
         "stderr should mention nested-launch guard: {stderr}"
     );
 

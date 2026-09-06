@@ -108,18 +108,10 @@ pub(super) fn render_agent_panel_header(
     if area.height < 2 {
         return false;
     }
-    let sort_label: String =
-        snapshot
-            .agent_view_label
-            .clone()
-            .unwrap_or(match config.agent_panel_sort {
-                crate::config::AgentPanelSortConfig::Spaces => {
-                    rust_i18n::t!("status.grouped").to_string()
-                }
-                crate::config::AgentPanelSortConfig::Priority => {
-                    rust_i18n::t!("status.priority").to_string()
-                }
-            });
+    let sort_label = agent_view_label.unwrap_or(match config.agent_panel_sort {
+        crate::config::AgentPanelSortConfig::Spaces => "grouped",
+        crate::config::AgentPanelSortConfig::Priority => "priority",
+    });
     let sort_width = display_width(&sort_label).min(area.width as usize) as u16;
     let left_width = area.width.saturating_sub(sort_width);
     let left_text = crate::ui::truncate_end(

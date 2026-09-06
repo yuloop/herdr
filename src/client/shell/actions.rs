@@ -570,7 +570,7 @@ impl ClientShellState {
                     "endpoint_cancelled" => (
                         ClientEndpointNoticeKind::Unavailable,
                         "cancelled".to_owned(),
-                        "Action interrupted",
+                        "Action interrupted".to_string(),
                         error.message.clone(),
                     ),
                     "server_unavailable" => (

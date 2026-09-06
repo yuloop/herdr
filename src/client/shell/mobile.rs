@@ -594,9 +594,9 @@ fn mobile_items(
 ) -> Vec<MobileItem> {
     let palette = &config.palette;
     let mut items = Vec::new();
-    let ordered_agents =
-        super::agent_sidebar::ordered_agent_pane_ids(snapshot, config.agent_panel_sort);
-    if !ordered_agents.is_empty() || snapshot.agent_view_label.is_some() {
+    let agents =
+        super::aggregate_navigation::aggregate_agent_rows(endpoints, config.agent_panel_sort);
+    if !agents.is_empty() || snapshot.agent_view_label.is_some() {
         let title = snapshot
             .agent_view_label
             .as_deref()
@@ -750,7 +750,7 @@ fn mobile_items(
             } else if endpoint.endpoint_id == active_endpoint_id && workspace.focused {
                 palette.surface_dim
             } else {
-                "├─ "
+                palette.panel_bg
             };
             let connector = if entry.indented {
                 if entry.last_child {

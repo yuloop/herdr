@@ -24,6 +24,7 @@ mod detect;
 mod events;
 mod ghostty;
 mod handoff_runtime;
+mod i18n;
 mod input;
 mod integration;
 mod ipc;
@@ -478,6 +479,8 @@ where
         })
         .collect()
 }
+
+rust_i18n::i18n!("locales", fallback = "en");
 
 fn main() -> io::Result<()> {
     let raw_args: Vec<String> = match args_as_utf8(std::env::args_os()) {

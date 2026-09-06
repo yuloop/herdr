@@ -1,0 +1,50 @@
+name: Herdr Sync Upstream
+on:
+  schedule:
+    - cron: "6 * * * *"   # 每小时 :06，错开其他流水线
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Merge upstream into main
+        run: |
+          set -euo pipefail
+          git config user.name "yuloop"
+          git config user.email "yuloop@users.noreply.github.com"
+          git remote add upstream "https://github.com/herdrdev/herdr.git"
+          git fetch upstream master
+          # 无新提交 → 静默退出（不产生任何 commit）
+          if git merge-base --is-ancestor upstream/master HEAD; then
+            echo "上游无新提交，跳过"
+            exit 0
+          fi
+          # 汉化分支基于上游 + 本地补丁：普通 merge 即可；本地补丁主要在 locales/ 与 src/ 的 i18n 文案
+          # -X ours：源码同文件内容冲突时保留汉化版本（上游功能修复会保留在独有/不冲突文件中）
+          # 本仓库删除了部分上游 workflow（如 preview.yml），上游仍在修改它们 → modify/delete 冲突
+          # || true：允许 merge 以非零退出（存在未解决冲突），随后统一处理 workflow 目录
+          git merge --no-commit -X ours --no-edit FETCH_HEAD || true
+          # 上游带入的 .github/workflows 文件（如 preview.yml 等）需要 workflows 权限才能 push
+          # GITHUB_TOKEN 只有 contents: write，没有 workflows 权限，所以全部还原为本仓库版本
+          # 先移除全部 unmerged 条目（modify/delete 冲突会让 restore 报错），再整体还原 workflow 目录
+          git ls-files -u | awk '{print $4}' | sort -u | grep '^\.github/workflows/' | xargs -r git rm -f -q || true
+          git checkout -q HEAD -- .github/workflows || true
+          git add .github/workflows
+          # 检查是否还有其他未解决冲突（非 workflow 文件），有则报错停止
+          if git ls-files -u | grep -v "^\.github/workflows/" | grep -q .; then
+            echo "存在非 workflow 文件冲突，需人工处理"
+            git status --short | head -20
+            exit 2
+          fi
+          if git diff --cached --quiet; then
+            echo "无变更，跳过提交"
+            exit 0
+          fi
+          git commit --no-edit || true
+          git push origin HEAD:main

@@ -751,27 +751,13 @@ fn mobile_items(
                 palette.surface_dim
             } else {
                 "├─ "
-            }
-        } else {
-            ""
-        };
-        let name = if entry.indented && !workspace.custom_label {
-            workspace
-                .branch
-                .as_deref()
-                .and_then(|branch| branch.strip_prefix("worktree/").or(Some(branch)))
-                .unwrap_or(&workspace.label)
-        } else {
-            &workspace.label
-        };
-        let branch: String = workspace
-            .branch
-            .as_deref()
-            .map(str::to_owned)
-            .unwrap_or_else(|| rust_i18n::t!("nav.shell").to_string());
-        let detail_prefix = if entry.indented {
-            if entry.last_child {
-                "       "
+            };
+            let connector = if entry.indented {
+                if entry.last_child {
+                    "└─ "
+                } else {
+                    "├─ "
+                }
             } else {
                 ""
             };
@@ -784,7 +770,11 @@ fn mobile_items(
             } else {
                 &workspace.label
             };
-            let branch = workspace.branch.as_deref().unwrap_or("shell");
+            let branch: String = workspace
+                .branch
+                .as_deref()
+                .map(str::to_owned)
+                .unwrap_or_else(|| rust_i18n::t!("nav.shell").to_string());
             let detail_prefix = if entry.indented {
                 if entry.last_child {
                     "       "

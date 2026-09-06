@@ -31,6 +31,8 @@ fn env_bool(name: &str) -> Option<bool> {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=locales/en.yml");
+    println!("cargo:rerun-if-changed=locales/zh.yml");
     println!("cargo:rerun-if-changed=vendor/libghostty-vt.vendor.json");
     println!("cargo:rerun-if-changed=vendor/libghostty-vt/build.zig");
     println!("cargo:rerun-if-changed=vendor/libghostty-vt/build.zig.zon");

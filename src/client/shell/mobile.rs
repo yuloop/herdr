@@ -94,7 +94,7 @@ fn render_header_status(
             area.x,
             area.y,
             area.width,
-            &rust_i18n::t!("mobile.no_workspace").to_string(),
+            rust_i18n::t!("mobile.no_workspace").as_ref(),
             Style::default().fg(palette.text).bg(palette.panel_bg),
         );
         return;
@@ -277,7 +277,7 @@ fn render_agent_summary(
             area.x,
             area.y,
             area.width,
-            &rust_i18n::t!("mobile.no_agents").to_string(),
+            rust_i18n::t!("mobile.no_agents").as_ref(),
             Style::default()
                 .fg(config.palette.overlay1)
                 .bg(config.palette.panel_bg),
@@ -290,7 +290,7 @@ fn render_agent_summary(
             area.x,
             area.y,
             area.width,
-            &rust_i18n::t!("mobile.all_idle").to_string(),
+            rust_i18n::t!("mobile.all_idle").as_ref(),
             Style::default()
                 .fg(config.palette.overlay1)
                 .bg(config.palette.panel_bg),
@@ -419,7 +419,7 @@ pub(super) fn render_mobile_switcher(
         area.x,
         area.y,
         close.x.saturating_sub(area.x),
-        &rust_i18n::t!("mobile.switch").to_string(),
+        rust_i18n::t!("mobile.switch").as_ref(),
         Style::default()
             .fg(palette.text)
             .bg(palette.panel_bg)
@@ -563,7 +563,7 @@ fn render_close_button(buffer: &mut Buffer, area: Rect, palette: &Palette) {
         label_x,
         area.y,
         area.width.saturating_sub(1),
-        &rust_i18n::t!("mobile.close_btn").to_string(),
+        rust_i18n::t!("mobile.close_btn").as_ref(),
         Style::default()
             .fg(palette.overlay1)
             .bg(palette.surface0)

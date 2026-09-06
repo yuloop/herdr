@@ -12,7 +12,7 @@ pub(super) fn render_worktree_create_overlay(
         inner.x,
         inner.y,
         inner.width,
-        &rust_i18n::t!("dialog.new_worktree").to_string(),
+        rust_i18n::t!("dialog.new_worktree").as_ref(),
         Style::default()
             .fg(p.text)
             .bg(p.panel_bg)
@@ -23,7 +23,7 @@ pub(super) fn render_worktree_create_overlay(
         inner.x,
         inner.y + 2,
         inner.width,
-        &rust_i18n::t!("dialog.branch").to_string(),
+        rust_i18n::t!("dialog.branch").as_ref(),
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
     let input = Rect::new(inner.x, inner.y + 3, inner.width, 1);
@@ -41,7 +41,7 @@ pub(super) fn render_worktree_create_overlay(
         inner.x,
         inner.y + 5,
         inner.width,
-        &rust_i18n::t!("dialog.checkout").to_string(),
+        rust_i18n::t!("dialog.checkout").as_ref(),
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
     put_text(
@@ -58,7 +58,7 @@ pub(super) fn render_worktree_create_overlay(
             inner.x,
             inner.y + 8,
             inner.width,
-            &rust_i18n::t!("dialog.creating").to_string(),
+            rust_i18n::t!("dialog.creating").as_ref(),
             Style::default().fg(p.accent).bg(p.panel_bg),
         );
     } else if let Some(error) = create.error.as_deref() {
@@ -125,7 +125,7 @@ pub(super) fn render_worktree_open_overlay(
         inner.x,
         inner.y,
         inner.width,
-        &rust_i18n::t!("dialog.open_worktree").to_string(),
+        rust_i18n::t!("dialog.open_worktree").as_ref(),
         Style::default()
             .fg(p.text)
             .bg(p.panel_bg)
@@ -239,7 +239,7 @@ pub(super) fn render_worktree_open_overlay(
             body.x,
             body.y,
             body.width,
-            &rust_i18n::t!("dialog.no_matching_worktrees").to_string(),
+            rust_i18n::t!("dialog.no_matching_worktrees").as_ref(),
             Style::default().fg(p.overlay0).bg(p.panel_bg),
         );
     }
@@ -249,7 +249,7 @@ pub(super) fn render_worktree_open_overlay(
             inner.x,
             inner.bottom() - 3,
             inner.width,
-            &rust_i18n::t!("dialog.opening").to_string(),
+            rust_i18n::t!("dialog.opening").as_ref(),
             Style::default().fg(p.accent).bg(p.panel_bg),
         );
     } else if let Some(error) = open.error.as_deref() {
@@ -315,7 +315,7 @@ pub(super) fn render_worktree_remove_overlay(
         inner.x,
         inner.y,
         inner.width,
-        &rust_i18n::t!("dialog.delete_worktree_title").to_string(),
+        rust_i18n::t!("dialog.delete_worktree_title").as_ref(),
         Style::default()
             .fg(p.red)
             .bg(p.panel_bg)
@@ -326,7 +326,7 @@ pub(super) fn render_worktree_remove_overlay(
         inner.x,
         inner.y + 1,
         inner.width,
-        &rust_i18n::t!("dialog.removes_folder").to_string(),
+        rust_i18n::t!("dialog.removes_folder").as_ref(),
         Style::default().fg(p.text).bg(p.panel_bg),
     );
     put_text(
@@ -342,7 +342,7 @@ pub(super) fn render_worktree_remove_overlay(
         inner.x,
         inner.y + 3,
         inner.width,
-        &rust_i18n::t!("dialog.branch_not_deleted").to_string(),
+        rust_i18n::t!("dialog.branch_not_deleted").as_ref(),
         Style::default().fg(p.text).bg(p.panel_bg),
     );
     if remove.force_confirmation {
@@ -351,7 +351,7 @@ pub(super) fn render_worktree_remove_overlay(
             inner.x,
             inner.y + 4,
             inner.width,
-            &rust_i18n::t!("dialog.dirty_warning").to_string(),
+            rust_i18n::t!("dialog.dirty_warning").as_ref(),
             Style::default().fg(p.red).bg(p.panel_bg),
         );
     }
@@ -361,7 +361,7 @@ pub(super) fn render_worktree_remove_overlay(
             inner.x,
             inner.y + 5,
             inner.width,
-            &rust_i18n::t!("dialog.removing").to_string(),
+            rust_i18n::t!("dialog.removing").as_ref(),
             Style::default().fg(p.accent).bg(p.panel_bg),
         );
     } else if let Some(error) = remove.error.as_deref() {

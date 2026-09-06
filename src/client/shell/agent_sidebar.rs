@@ -112,10 +112,10 @@ pub(super) fn render_agent_panel_header(
         crate::config::AgentPanelSortConfig::Spaces => "grouped",
         crate::config::AgentPanelSortConfig::Priority => "priority",
     });
-    let sort_width = display_width(&sort_label).min(area.width as usize) as u16;
+    let sort_width = display_width(sort_label).min(area.width as usize) as u16;
     let left_width = area.width.saturating_sub(sort_width);
     let left_text = crate::ui::truncate_end(
-        &rust_i18n::t!("sidebar.agents").to_string(),
+        rust_i18n::t!("sidebar.agents").as_ref(),
         left_width as usize,
     );
     put_text(
@@ -144,7 +144,7 @@ pub(super) fn render_agent_panel_header(
         sort_rect.x,
         sort_rect.y,
         sort_rect.width,
-        &crate::ui::truncate_end(&sort_label, sort_width as usize),
+        &crate::ui::truncate_end(sort_label, sort_width as usize),
         Style::default()
             .fg(if agent_view_label.is_some() {
                 config.palette.accent

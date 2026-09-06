@@ -203,7 +203,7 @@ pub(super) fn render_mode_bar(
             buffer,
             area,
             area.y,
-            &rust_i18n::t!("menu.update_ready").to_string(),
+            rust_i18n::t!("menu.update_ready").as_ref(),
             Style::default()
                 .fg(palette.accent)
                 .bg(palette.panel_bg)

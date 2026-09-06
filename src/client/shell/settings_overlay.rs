@@ -58,7 +58,7 @@ pub(super) fn render_settings_overlay(
         inner.x,
         inner.y,
         inner.width,
-        &rust_i18n::t!("settings.title").to_string(),
+        rust_i18n::t!("settings.title").as_ref(),
         Style::default()
             .fg(palette.text)
             .bg(palette.panel_bg)
@@ -181,8 +181,8 @@ pub(super) fn render_settings_overlay(
             render_choice_section(
                 buffer,
                 content,
-                &rust_i18n::t!("state.sound_alerts").to_string(),
-                &rust_i18n::t!("state.sound_alerts_desc").to_string(),
+                rust_i18n::t!("state.sound_alerts").as_ref(),
+                rust_i18n::t!("state.sound_alerts_desc").as_ref(),
                 &[&on, &off],
                 settings.selected,
                 palette,
@@ -197,8 +197,8 @@ pub(super) fn render_settings_overlay(
             render_choice_section(
                 buffer,
                 content,
-                &rust_i18n::t!("state.notification_popups").to_string(),
-                &rust_i18n::t!("state.notification_popups_desc").to_string(),
+                rust_i18n::t!("state.notification_popups").as_ref(),
+                rust_i18n::t!("state.notification_popups_desc").as_ref(),
                 &[&off, &inside, &via_terminal, &via_system],
                 settings.selected,
                 palette,
@@ -322,7 +322,7 @@ fn render_integrations(
         area.x,
         area.y,
         area.width,
-        &rust_i18n::t!("settings.agent_integrations").to_string(),
+        rust_i18n::t!("settings.agent_integrations").as_ref(),
         Style::default()
             .fg(palette.text)
             .bg(palette.panel_bg)
@@ -333,7 +333,7 @@ fn render_integrations(
         area.x,
         area.y + 1,
         area.width,
-        &rust_i18n::t!("settings.integrations_desc").to_string(),
+        rust_i18n::t!("settings.integrations_desc").as_ref(),
         Style::default().fg(palette.overlay1).bg(palette.panel_bg),
     );
     if settings.loading_integrations {
@@ -353,7 +353,7 @@ fn render_integrations(
             area.x,
             area.y + 3,
             area.width,
-            &rust_i18n::t!("settings.no_integration_targets").to_string(),
+            rust_i18n::t!("settings.no_integration_targets").as_ref(),
             Style::default().fg(palette.overlay1).bg(palette.panel_bg),
         );
         return;

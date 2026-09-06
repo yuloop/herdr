@@ -948,6 +948,7 @@ impl Workspace {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn restore_moved_pane(
         &mut self,
         token: PaneMoveRestoreToken,
@@ -1228,6 +1229,7 @@ impl Workspace {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) enum PaneSourceTabRestore {
     Retained {
         tab_idx: usize,
@@ -1241,6 +1243,7 @@ pub(crate) enum PaneSourceTabRestore {
     },
 }
 
+#[allow(dead_code)]
 pub(crate) struct PaneMoveRestoreToken {
     source_tab: PaneSourceTabRestore,
     source_active_tab: usize,

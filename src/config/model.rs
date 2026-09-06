@@ -151,6 +151,7 @@ pub enum CopyOnSelectModeConfig {
     Manual,
 }
 
+#[allow(dead_code)]
 impl CopyOnSelectModeConfig {
     pub fn is_enabled(self) -> bool {
         self != Self::Disabled

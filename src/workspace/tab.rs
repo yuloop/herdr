@@ -489,6 +489,7 @@ impl Tab {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn restore_moved_pane(&mut self, moved: MovedPane) -> Result<(), MovedPane> {
         if self.panes.contains_key(&moved.pane_id) {
             return Err(moved);

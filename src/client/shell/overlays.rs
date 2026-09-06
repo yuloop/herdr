@@ -356,7 +356,7 @@ fn render_release_notes_overlay(
     button(
         b,
         close,
-        &rust_i18n::t!("overlay.esc_close").to_string(),
+        rust_i18n::t!("overlay.esc_close").as_ref(),
         Style::default()
             .fg(contrast(p))
             .bg(p.accent)
@@ -480,7 +480,7 @@ fn render_product_announcement_overlay(
     button(
         b,
         close,
-        &rust_i18n::t!("overlay.esc_close").to_string(),
+        rust_i18n::t!("overlay.esc_close").as_ref(),
         Style::default()
             .fg(contrast(p))
             .bg(p.accent)
@@ -1145,7 +1145,7 @@ fn render_help_overlay(
         i.x,
         i.y,
         i.width,
-        &rust_i18n::t!("keybind.title").to_string(),
+        rust_i18n::t!("keybind.title").as_ref(),
         Style::default()
             .fg(p.text)
             .bg(p.panel_bg)
@@ -1294,7 +1294,7 @@ fn render_confirm_close_overlay(
     button(
         b,
         *ok,
-        &rust_i18n::t!("overlay.confirm_btn").to_string(),
+        rust_i18n::t!("overlay.confirm_btn").as_ref(),
         Style::default()
             .fg(contrast(p))
             .bg(p.red)
@@ -1303,7 +1303,7 @@ fn render_confirm_close_overlay(
     button(
         b,
         *cancel,
-        &rust_i18n::t!("overlay.esc_cancel").to_string(),
+        rust_i18n::t!("overlay.esc_cancel").as_ref(),
         Style::default()
             .fg(p.text)
             .bg(p.surface0)

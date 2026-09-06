@@ -44,6 +44,7 @@ jobs:
           ref: ${{ env.CUSTOM_BRANCH }}
           fetch-depth: 0
           persist-credentials: true
+          token: ${{ secrets.YU_TOKEN }}
 
       - name: Initialize automation context
         shell: bash

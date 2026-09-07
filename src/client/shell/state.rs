@@ -1704,7 +1704,7 @@ impl ClientShellState {
                 || previous.inner_rect.height != next.inner_rect.height
                 || previous.alternate_screen_active != next.alternate_screen_active
                 // Manual mouse selections track a live buffer range, not a content revision.
-                || (self.config.copy_on_select
+                 || (self.config.copy_on_select.is_enabled()
                 && previous.content_revision != next.content_revision
                 && (!previous.content_revision.is_multiple_of(2)
                     || !next.content_revision.is_multiple_of(2)

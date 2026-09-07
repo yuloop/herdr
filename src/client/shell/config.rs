@@ -441,7 +441,7 @@ mod tests {
         next.ui.tab_bar_position = TabBarPositionConfig::Bottom;
         next.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
         next.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
-        next.ui.sidebar.agents.row_gap = 2;
+        next.ui.sidebar.agents = toml::from_str("rows = [[{ token = 'machine', rules = [{ equals = 'Local', bold = true }] }]]\nrow_gap = 2").unwrap();
         next.keys.prefix = "ctrl+a".to_owned();
 
         let diagnostics = shell.apply_live_config(&next, &[], &[]);
@@ -458,6 +458,17 @@ mod tests {
             crate::config::StatusIndicatorStyle::Symbols
         );
         assert_eq!(shell.agents.row_gap, 2);
+        assert_eq!(
+            shell.agents.rows[0][0].style_for_value("Local").bold,
+            Some(true)
+        );
+        let previous = shell.agents.clone();
+        shell.apply_live_config(
+            &Config::default(),
+            &[],
+            &["ui".to_owned(), "keys".to_owned()],
+        );
+        assert_eq!(shell.agents, previous);
         assert_eq!(
             shell.keybinds.prefix,
             (KeyCode::Char('a'), KeyModifiers::CONTROL)

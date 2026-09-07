@@ -95,7 +95,7 @@ fn mobile_switcher_can_activate_an_online_saved_machine() {
         .iter()
         .map(|cell| cell.symbol.as_str())
         .collect::<String>();
-    assert!(text.contains("machines"));
+    assert!(text.contains("spaces"));
     assert!(text.contains("Build"));
     let machine = state
         .hits

@@ -118,6 +118,7 @@ pub(super) struct ClientShellLayout {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(super) enum ClientMobileTarget {
     Machine(ClientEndpointId),
     NewWorkspace,
@@ -1703,7 +1704,7 @@ impl ClientShellState {
                 || previous.inner_rect.height != next.inner_rect.height
                 || previous.alternate_screen_active != next.alternate_screen_active
                 // Manual mouse selections track a live buffer range, not a content revision.
-                || (self.config.copy_on_select
+                 || (self.config.copy_on_select.is_enabled()
                 && previous.content_revision != next.content_revision
                 && (!previous.content_revision.is_multiple_of(2)
                     || !next.content_revision.is_multiple_of(2)
@@ -1837,44 +1838,5 @@ impl ClientShellState {
         self.pending_pane_surface = None;
         self.hits = ShellHitMap::default();
         self.host_mouse_pixels = None;
-    }
-
-    fn wants_ascii_input(&self) -> bool {
-        if let Some(overlay) = self.overlay.as_ref() {
-            return matches!(
-                overlay,
-                ClientShellOverlay::ConfirmClose(_)
-                    | ClientShellOverlay::Help(_)
-                    | ClientShellOverlay::Navigator(_)
-                    | ClientShellOverlay::WorktreeRemove(_)
-                    | ClientShellOverlay::PaneMove(_)
-                    | ClientShellOverlay::ContextMenu(_)
-                    | ClientShellOverlay::GlobalMenu(_)
-            );
-        }
-        matches!(
-            self.mode,
-            ClientShellMode::Prefix
-                | ClientShellMode::Navigate
-                | ClientShellMode::Resize
-                | ClientShellMode::Copy
-        )
-    }
-
-    pub(crate) fn reconcile_input_source(&mut self) {
-        // Keep the platform restore token while another window has focus. Restoring
-        // through a global key injection is only safe after this client regains focus.
-        if self.outer_focused == Some(false) {
-            return;
-        }
-        let desired = self.config.switch_ascii_input_source_in_prefix && self.wants_ascii_input();
-        if desired != self.ascii_input_source_active {
-            self.ascii_input_source_active = desired;
-            self.pending_input_source_changes.push(desired);
-        }
-    }
-
-    pub(crate) fn take_input_source_changes(&mut self) -> Vec<bool> {
-        std::mem::take(&mut self.pending_input_source_changes)
     }
 }

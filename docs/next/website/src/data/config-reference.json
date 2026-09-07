@@ -901,9 +901,20 @@
         },
         {
           "key": "ui.copy_on_select",
-          "type": "boolean",
-          "default": "true",
-          "description": "Automatically copy text selected by mouse drag or double-click. When disabled, Ctrl+C or a host-forwarded Cmd+C copies and clears the retained selection."
+          "type": "enum",
+          "default": "\"manual\"",
+          "description": "Mouse selection behavior: clipboard, manual, or disabled. Also accepts true/false. Default: manual.",
+          "values": [
+            "disabled",
+            "clipboard",
+            "manual"
+          ]
+        },
+        {
+          "key": "ui.language",
+          "type": "string",
+          "default": "\"zh\"",
+          "description": "UI language: \"zh\" for 简体中文 (default) or \"en\" for English."
         },
         {
           "key": "ui.host_cursor",

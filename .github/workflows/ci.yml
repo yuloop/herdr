@@ -76,7 +76,6 @@ jobs:
           targets: x86_64-pc-windows-msvc
 
       - name: Install Rust tools
-        if: matrix.kind == 'unix'
         uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
         with:
           tool: just,cargo-nextest

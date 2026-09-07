@@ -68,6 +68,7 @@ pub(crate) fn update_file_at(
         .map_err(|error| format!("failed to save {description}: {error}"))
 }
 
+#[allow(dead_code)]
 pub(crate) fn write_edit(edit: ConfigEdit<'_>) -> Result<(), String> {
     update_file_at(&super::config_path(), edit.description(), |content| {
         edit.apply(content)

@@ -114,6 +114,7 @@ fn write_requested_help(
     Ok(true)
 }
 
+#[allow(dead_code)]
 fn completion_command() -> Command {
     Command::new("completion")
         .visible_alias("completions")
@@ -1038,7 +1039,6 @@ fn path_arg(name: &'static str, value_name: &'static str) -> Arg {
 #[cfg(test)]
 mod tests {
     use clap::{Arg, Command};
-    use rust_i18n::t;
 
     fn command_path<'a>(cmd: &'a Command, path: &[&str]) -> &'a Command {
         let mut current = cmd;

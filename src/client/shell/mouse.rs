@@ -1711,7 +1711,7 @@ impl ClientShellState {
             if copied
                 && self.config.copy_on_select == crate::config::CopyOnSelectModeConfig::Clipboard
             {
-                self.request_selection_copy(outcome);
+                self.request_selection_copy(outcome, false);
                 self.selection = None;
             } else if !copied {
                 self.selection = None;

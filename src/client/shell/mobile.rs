@@ -94,7 +94,7 @@ fn render_header_status(
             area.x,
             area.y,
             area.width,
-            &rust_i18n::t!("mobile.no_workspace").to_string(),
+            rust_i18n::t!("mobile.no_workspace").as_ref(),
             Style::default().fg(palette.text).bg(palette.panel_bg),
         );
         return;
@@ -277,7 +277,7 @@ fn render_agent_summary(
             area.x,
             area.y,
             area.width,
-            &rust_i18n::t!("mobile.no_agents").to_string(),
+            rust_i18n::t!("mobile.no_agents").as_ref(),
             Style::default()
                 .fg(config.palette.overlay1)
                 .bg(config.palette.panel_bg),
@@ -290,7 +290,7 @@ fn render_agent_summary(
             area.x,
             area.y,
             area.width,
-            &rust_i18n::t!("mobile.all_idle").to_string(),
+            rust_i18n::t!("mobile.all_idle").as_ref(),
             Style::default()
                 .fg(config.palette.overlay1)
                 .bg(config.palette.panel_bg),
@@ -419,7 +419,7 @@ pub(super) fn render_mobile_switcher(
         area.x,
         area.y,
         close.x.saturating_sub(area.x),
-        &rust_i18n::t!("mobile.switch").to_string(),
+        rust_i18n::t!("mobile.switch").as_ref(),
         Style::default()
             .fg(palette.text)
             .bg(palette.panel_bg)
@@ -563,7 +563,7 @@ fn render_close_button(buffer: &mut Buffer, area: Rect, palette: &Palette) {
         label_x,
         area.y,
         area.width.saturating_sub(1),
-        &rust_i18n::t!("mobile.close_btn").to_string(),
+        rust_i18n::t!("mobile.close_btn").as_ref(),
         Style::default()
             .fg(palette.overlay1)
             .bg(palette.surface0)
@@ -594,9 +594,37 @@ fn mobile_items(
 ) -> Vec<MobileItem> {
     let palette = &config.palette;
     let mut items = Vec::new();
-    let ordered_agents =
-        super::agent_sidebar::ordered_agent_pane_ids(snapshot, config.agent_panel_sort);
-    if !ordered_agents.is_empty() || snapshot.agent_view_label.is_some() {
+    if endpoints.len() > 1 {
+        items.push(MobileItem::section("machines", palette));
+        for endpoint in endpoints {
+            let background = palette.panel_bg;
+            let (symbol, state, color) = endpoint_status_presentation(endpoint.status, palette);
+            items.push(MobileItem {
+                lines: vec![
+                    Line::from(vec![
+                        Span::styled("  ", Style::default().bg(background)),
+                        Span::styled(symbol, Style::default().fg(color).bg(background)),
+                        Span::styled(
+                            format!(" {}", endpoint.label),
+                            Style::default()
+                                .fg(palette.text)
+                                .bg(background)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]),
+                    Line::from(Span::styled(
+                        format!("    {state}"),
+                        Style::default().fg(palette.overlay0).bg(background),
+                    )),
+                ],
+                background,
+                target: Some(ClientMobileTarget::Machine(endpoint.endpoint_id.clone())),
+            });
+        }
+    }
+    let agents =
+        super::aggregate_navigation::aggregate_agent_rows(endpoints, config.agent_panel_sort);
+    if !agents.is_empty() || snapshot.agent_view_label.is_some() {
         let title = snapshot
             .agent_view_label
             .as_deref()
@@ -750,28 +778,14 @@ fn mobile_items(
             } else if endpoint.endpoint_id == active_endpoint_id && workspace.focused {
                 palette.surface_dim
             } else {
-                "├─ "
-            }
-        } else {
-            ""
-        };
-        let name = if entry.indented && !workspace.custom_label {
-            workspace
-                .branch
-                .as_deref()
-                .and_then(|branch| branch.strip_prefix("worktree/").or(Some(branch)))
-                .unwrap_or(&workspace.label)
-        } else {
-            &workspace.label
-        };
-        let branch: String = workspace
-            .branch
-            .as_deref()
-            .map(str::to_owned)
-            .unwrap_or_else(|| rust_i18n::t!("nav.shell").to_string());
-        let detail_prefix = if entry.indented {
-            if entry.last_child {
-                "       "
+                palette.panel_bg
+            };
+            let connector = if entry.indented {
+                if entry.last_child {
+                    "└─ "
+                } else {
+                    "├─ "
+                }
             } else {
                 ""
             };
@@ -784,7 +798,11 @@ fn mobile_items(
             } else {
                 &workspace.label
             };
-            let branch = workspace.branch.as_deref().unwrap_or("shell");
+            let branch: String = workspace
+                .branch
+                .as_deref()
+                .map(str::to_owned)
+                .unwrap_or_else(|| rust_i18n::t!("nav.shell").to_string());
             let detail_prefix = if entry.indented {
                 if entry.last_child {
                     "       "

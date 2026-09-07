@@ -88,6 +88,7 @@ pub enum LayoutPreset {
     MainTop,
 }
 
+#[allow(dead_code)]
 impl LayoutPreset {
     pub const ALL: [Self; 5] = [
         Self::Columns,

@@ -356,7 +356,7 @@ fn render_release_notes_overlay(
     button(
         b,
         close,
-        &rust_i18n::t!("overlay.esc_close").to_string(),
+        rust_i18n::t!("overlay.esc_close").as_ref(),
         Style::default()
             .fg(contrast(p))
             .bg(p.accent)
@@ -480,7 +480,7 @@ fn render_product_announcement_overlay(
     button(
         b,
         close,
-        &rust_i18n::t!("overlay.esc_close").to_string(),
+        rust_i18n::t!("overlay.esc_close").as_ref(),
         Style::default()
             .fg(contrast(p))
             .bg(p.accent)
@@ -711,90 +711,6 @@ fn render_rename_overlay(
     })
 }
 
-pub(crate) fn client_navigator_rows(
-    s: &ClientShellSnapshot,
-    n: &ClientNavigatorOverlay,
-) -> Vec<ClientNavigatorRow> {
-    let q = n.query.trim().to_lowercase();
-    let filter = |st| match n.filter {
-        Some(ClientNavigatorFilter::Blocked) => st == crate::api::schema::AgentStatus::Blocked,
-        Some(ClientNavigatorFilter::Working) => st == crate::api::schema::AgentStatus::Working,
-        Some(ClientNavigatorFilter::Idle) => st == crate::api::schema::AgentStatus::Idle,
-        Some(ClientNavigatorFilter::Done) => st == crate::api::schema::AgentStatus::Done,
-        None => true,
-    };
-    let text = |v: &str| q.is_empty() || v.to_lowercase().contains(&q);
-    let filtering = n.filter.is_some() || !q.is_empty();
-    let mut out = Vec::new();
-    for w in &s.workspaces {
-        let mut children = Vec::new();
-        for t in s.tabs.iter().filter(|t| t.workspace_id == w.workspace_id) {
-            let mut panes = Vec::new();
-            for (ix, p) in s.panes.iter().filter(|p| p.tab_id == t.tab_id).enumerate() {
-                let a = s.agents.iter().find(|a| a.pane_id == p.pane_id);
-                let st = a
-                    .map(|a| a.agent_status)
-                    .unwrap_or(crate::api::schema::AgentStatus::Unknown);
-                let label = p
-                    .label
-                    .clone()
-                    .or_else(|| a.and_then(|a| a.name.clone()))
-                    .or_else(|| a.and_then(|a| a.display_agent.clone()))
-                    .or_else(|| a.and_then(|a| a.title.clone()))
-                    .unwrap_or_else(|| {
-                        rust_i18n::t!("nav.pane_label", number = ix + 1).to_string()
-                    });
-                let meta = p
-                    .foreground_cwd
-                    .clone()
-                    .or_else(|| p.cwd.clone())
-                    .unwrap_or_default();
-                if !filtering || filter(st) && (text(&label) || text(&meta)) {
-                    panes.push(ClientNavigatorRow {
-                        depth: 2,
-                        label,
-                        meta,
-                        status: st,
-                        current: s.focused_pane_id.as_deref() == Some(&p.pane_id),
-                        target: ClientNavigatorTarget::Pane(p.pane_id.clone()),
-                    })
-                }
-            }
-            if !filtering || filter(t.agent_status) && text(&t.label) || !panes.is_empty() {
-                children.push(ClientNavigatorRow {
-                    depth: 1,
-                    label: t.label.clone(),
-                    meta: rust_i18n::t!(
-                        "nav.pane_count",
-                        count = s.panes.iter().filter(|p| p.tab_id == t.tab_id).count()
-                    )
-                    .to_string(),
-                    status: t.agent_status,
-                    current: s.focused_tab_id.as_deref() == Some(&t.tab_id),
-                    target: ClientNavigatorTarget::Tab(t.tab_id.clone()),
-                });
-                children.extend(panes)
-            }
-        }
-        let wm =
-            filter(w.agent_status) && (text(&w.label) || w.branch.as_deref().is_some_and(&text));
-        if !filtering || wm || !children.is_empty() {
-            out.push(ClientNavigatorRow {
-                depth: 0,
-                label: w.label.clone(),
-                meta: w.branch.clone().unwrap_or_default(),
-                status: w.agent_status,
-                current: s.focused_workspace_id.as_deref() == Some(&w.workspace_id),
-                target: ClientNavigatorTarget::Workspace(w.workspace_id.clone()),
-            });
-            if n.expanded_workspaces.contains(&w.workspace_id) || filtering {
-                out.extend(children)
-            }
-        }
-    }
-    out
-}
-
 fn render_navigator_overlay(
     b: &mut Buffer,
     n: &ClientNavigatorOverlay,
@@ -844,7 +760,12 @@ fn render_navigator_overlay(
         b,
         i,
         i.y,
-        &rust_i18n::t!("nav.pane_count", count = s.panes.len()).to_string(),
+        &format!(
+            "{} panes",
+            rows.iter()
+                .filter(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. }))
+                .count()
+        ),
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
     put_text(
@@ -1224,7 +1145,7 @@ fn render_help_overlay(
         i.x,
         i.y,
         i.width,
-        &rust_i18n::t!("keybind.title").to_string(),
+        rust_i18n::t!("keybind.title").as_ref(),
         Style::default()
             .fg(p.text)
             .bg(p.panel_bg)
@@ -1373,7 +1294,7 @@ fn render_confirm_close_overlay(
     button(
         b,
         *ok,
-        &rust_i18n::t!("overlay.confirm_btn").to_string(),
+        rust_i18n::t!("overlay.confirm_btn").as_ref(),
         Style::default()
             .fg(contrast(p))
             .bg(p.red)
@@ -1382,7 +1303,7 @@ fn render_confirm_close_overlay(
     button(
         b,
         *cancel,
-        &rust_i18n::t!("overlay.esc_cancel").to_string(),
+        rust_i18n::t!("overlay.esc_cancel").as_ref(),
         Style::default()
             .fg(p.text)
             .bg(p.surface0)

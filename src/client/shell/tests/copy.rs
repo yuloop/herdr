@@ -170,7 +170,7 @@ fn clipboard_feedback_is_client_local_and_respects_config() {
 #[test]
 fn retained_mouse_selection_survives_output_and_copies_without_terminal_input() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.config.copy_on_select = crate::config::CopyOnSelectModeConfig::Manual;
+    state.config.copy_on_select = crate::config::CopyOnSelectModeConfig::Disabled;
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     state.compose(106, 20).expect("composed frame");
@@ -253,6 +253,7 @@ fn retained_mouse_selection_survives_output_and_copies_without_terminal_input() 
                 crate::api::schema::PaneSelectionReadParams { content_revision: None, .. }
             ))
     ));
+
     assert!(copy.requests.is_empty());
     let request_id = match &copy.actions[0] {
         ClientShellAction::Endpoint { request, .. } => request.id.clone(),
@@ -327,7 +328,7 @@ fn selection_edge_drag_requests_scroll_and_timer_continues_it() {
 #[test]
 fn keyboard_copy_mode_owns_cursor_selection_copy_and_scroll_restore() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.config.copy_on_select = false;
+    state.config.copy_on_select = crate::config::CopyOnSelectModeConfig::Disabled;
     state.set_snapshot(Box::new(snapshot()));
     let mut pane_surface = surface();
     pane_surface.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
@@ -830,7 +831,7 @@ fn navigator_owns_search_mouse_selection_and_stable_target_focus() {
 #[test]
 fn copy_mode_survives_mouse_motion_and_parks_across_focus_changes() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.config.copy_on_select = false;
+    state.config.copy_on_select = crate::config::CopyOnSelectModeConfig::Disabled;
     state.set_snapshot(Box::new(snapshot()));
     let mut pane_surface = surface();
     pane_surface.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
@@ -915,6 +916,7 @@ fn copy_mode_survives_mouse_motion_and_parks_across_focus_changes() {
         KeyCode::Char('c'),
         KeyModifiers::CONTROL,
     ))]);
+    eprintln!("REQS918: {:?}", copy.requests);
     assert!(copy.requests.is_empty());
     assert!(
         matches!(&copy.actions[..], [ClientShellAction::Endpoint { request, .. }]

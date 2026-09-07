@@ -516,7 +516,7 @@ impl ClientShellState {
         self.pending_word_selection = None;
         if self.mode != ClientShellMode::Copy
             && self.copy_or_terminal_mode() != ClientShellMode::Copy
-            && self.config.copy_on_select == crate::config::CopyOnSelectModeConfig::Manual
+            && self.config.copy_on_select != crate::config::CopyOnSelectModeConfig::Clipboard
             && is_retained_selection_copy_key(key)
             && self
                 .selection

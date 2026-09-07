@@ -91,12 +91,12 @@ pub(crate) fn prepare_saved_ssh(target: &str, session_name: &str) -> io::Result<
         manage_ssh_config,
         session_name.to_owned(),
     );
-    let prepared = prepare_remote_herdr(&ssh, true, true)?;
+    let prepared = prepare_remote_herdr(&ssh, false, true)?;
     ensure_remote_server_ready(
         &ssh,
         &prepared.remote_herdr,
         prepared.stop_after_install_approved,
-        true,
+        false,
         true,
     )?;
 
@@ -673,11 +673,13 @@ pub(super) fn prepare_remote_herdr(
             require_surface_interest,
         )?;
     }
-    confirm_remote_install(
-        &ssh.destination(),
-        &remote_herdr,
-        &install_source_description(&remote_herdr.platform, override_binary.as_deref()),
-    )?;
+    if !stop_after_install_approved {
+        confirm_remote_install(
+            &ssh.destination(),
+            &remote_herdr,
+            &install_source_description(&remote_herdr.platform, override_binary.as_deref()),
+        )?;
+    }
     let source = resolve_install_source(&remote_herdr.platform, override_binary)?;
     let install_result = ssh.install_herdr(&remote_herdr, &source.path);
     source.cleanup();
@@ -1173,7 +1175,7 @@ fn confirm_remote_install_with_running_server(
     eprintln!(
         "To complete the remote update, Herdr must stop the running remote server after installing."
     );
-    eprintln!("This stops active remote pane processes, including shells, dev servers, and tests.");
+    eprintln!("This stops active remote pane processes, including shells, agents, dev servers, and tests.");
     eprintln!();
     eprint!(
         "Install {} and stop the remote server now? [y/N] ",
@@ -1396,15 +1398,16 @@ fn confirm_remote_server_stop(
         }
     }
 
+    eprintln!("This stops active remote pane processes, including shells, agents, dev servers, and tests.");
     let prompt = if required_upgrade {
-        "update the remote server and continue attaching? [Y/n] "
+        "stop and update the remote server, then continue attaching? [y/N] "
     } else {
         "restart the remote server now? [y/N] "
     };
     eprint!("{prompt}");
     io::stderr().flush()?;
 
-    if read_remote_confirmation(&mut io::stdin().lock(), required_upgrade)? {
+    if read_remote_confirmation(&mut io::stdin().lock(), false)? {
         return Ok(true);
     }
     if required_upgrade {

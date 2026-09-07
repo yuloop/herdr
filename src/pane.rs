@@ -2194,7 +2194,12 @@ impl PaneRuntime {
             });
             let exit_events = events.clone();
             let on_reader_exit = Box::new(move || {
-                let _ = rt.block_on(exit_events.send(AppEvent::PaneDied { pane_id }));
+                // Imported handoff panes have no child wait handle, so their exit cause is
+                // unknowable. Checkpoint conservatively; normal autosave settles clean exits.
+                let _ = rt.block_on(exit_events.send(AppEvent::PaneDied {
+                    pane_id,
+                    exit_reason: crate::platform::ChildExitReason::Handoff,
+                }));
                 debug!(pane = pane_id.raw(), "handoff PTY actor exiting");
             });
             PaneRuntimeIo::Actor(PtyIoActor::spawn(PtyIoActorConfig {
@@ -2299,16 +2304,24 @@ impl PaneRuntime {
                 crate::logging::pane_spawned(pane_id.raw(), pid);
             }
             tokio::task::spawn_blocking(move || {
-                match child.wait() {
+                let exit_reason = match child.wait() {
                     Ok(status) => {
+                        let exit_reason = crate::platform::classify_child_exit(&status);
                         let status_text = format!("{status:?}");
                         crate::logging::pane_exited(pane_id.raw(), &status_text);
+                        exit_reason
                     }
-                    Err(e) => crate::logging::pane_exit_failed(pane_id.raw(), &e.to_string()),
-                }
+                    Err(e) => {
+                        crate::logging::pane_exit_failed(pane_id.raw(), &e.to_string());
+                        crate::platform::ChildExitReason::WaitFailed
+                    }
+                };
                 child_wait_completed.store(true, Ordering::Release);
                 // Use blocking send — PaneDied is critical, must not be dropped
-                if let Err(e) = rt.block_on(events.send(AppEvent::PaneDied { pane_id })) {
+                if let Err(e) = rt.block_on(events.send(AppEvent::PaneDied {
+                    pane_id,
+                    exit_reason,
+                })) {
                     error!(pane = pane_id.raw(), err = %e, "failed to send PaneDied event");
                 }
             });

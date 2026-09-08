@@ -13,7 +13,7 @@ use interprocess::TryClone as _;
 use serde::Deserialize;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    mpsc, Arc,
 };
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -23,6 +23,8 @@ const BRIDGE_IO_POLL: Duration = Duration::from_millis(1);
 const BRIDGE_SOCKET_PERMISSION_MODE: u32 = 0o600;
 const REMOTE_SERVER_SHUTDOWN_CONFIRM_TIMEOUT: Duration = Duration::from_secs(5);
 const NONINTERACTIVE_SSH_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
+const NONINTERACTIVE_SSH_STDERR_LIMIT: usize = 16 * 1024;
+const BRIDGE_FAILURE_REPORT_TIMEOUT: Duration = Duration::from_secs(1);
 const REMOTE_SERVER_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const CURRENT_PROTOCOL: u32 = crate::protocol::PROTOCOL_VERSION;
 const STABLE_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/latest.json";
@@ -1235,7 +1237,7 @@ fn probe_remote_endpoint(
     remote_herdr: &RemoteHerdr,
 ) -> io::Result<crate::client::endpoint::EndpointNegotiation> {
     let path = local_forward_socket_path(ssh.target(), &ssh.session_name);
-    let _bridge = SshStdioBridge::start(
+    let bridge = SshStdioBridge::start(
         ssh.target.clone(),
         remote_herdr.clone(),
         path.clone(),
@@ -1246,7 +1248,10 @@ fn probe_remote_endpoint(
     let mut stream = crate::ipc::connect_local_stream(&path)?;
     // Use the saved client's noninteractive path. This metadata-only attachment never
     // acquires a surface or sends pane input.
-    crate::client::probe_endpoint_negotiation(&mut stream)
+    match crate::client::probe_endpoint_negotiation(&mut stream) {
+        Ok(negotiation) => Ok(negotiation),
+        Err(probe_error) => Err(bridge.reported_failure().unwrap_or(probe_error)),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1780,6 +1785,7 @@ pub(super) struct SshStdioBridge {
     local_socket: PathBuf,
     socket_identity: crate::ipc::SocketFileIdentity,
     should_stop: Arc<AtomicBool>,
+    failure_rx: mpsc::Receiver<io::Error>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -1811,6 +1817,7 @@ impl SshStdioBridge {
         let should_stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&should_stop);
         let thread_ssh_options = ssh_options.cloned();
+        let (failure_tx, failure_rx) = mpsc::sync_channel(1);
         let thread = thread::spawn(move || {
             while !thread_stop.load(Ordering::Acquire) {
                 match listener.accept() {
@@ -1834,6 +1841,8 @@ impl SshStdioBridge {
                             noninteractive,
                             &thread_stop,
                         ) {
+                            let _ =
+                                failure_tx.try_send(io::Error::new(err.kind(), err.to_string()));
                             if noninteractive {
                                 tracing::warn!(error = %err, "saved SSH endpoint bridge failed");
                             } else {
@@ -1860,8 +1869,15 @@ impl SshStdioBridge {
             local_socket,
             socket_identity,
             should_stop,
+            failure_rx,
             thread: Some(thread),
         })
+    }
+
+    fn reported_failure(&self) -> Option<io::Error> {
+        self.failure_rx
+            .recv_timeout(BRIDGE_FAILURE_REPORT_TIMEOUT)
+            .ok()
     }
 }
 
@@ -2020,7 +2036,7 @@ fn bridge_connection(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(if noninteractive {
-            Stdio::null()
+            Stdio::piped()
         } else {
             Stdio::inherit()
         });
@@ -2035,6 +2051,14 @@ fn bridge_connection(
     let mut child_stdout = match child.stdout.take() {
         Some(stdout) => stdout,
         None => return terminate_bridge_child(child, "ssh bridge stdout missing"),
+    };
+    let stderr_reader = if noninteractive {
+        let Some(child_stderr) = child.stderr.take() else {
+            return terminate_bridge_child(child, "ssh bridge stderr missing");
+        };
+        Some(thread::spawn(move || capture_ssh_stderr(child_stderr)))
+    } else {
+        None
     };
     let stream_to_child = match stream.try_clone() {
         Ok(stream) => stream,
@@ -2132,10 +2156,19 @@ fn bridge_connection(
     let download_result = download
         .join()
         .map_err(|_| io::Error::other("remote bridge download worker panicked"))?;
+    let stderr = match stderr_reader {
+        Some(reader) => reader
+            .join()
+            .map_err(|_| io::Error::other("SSH stderr reader panicked"))??,
+        None => Vec::new(),
+    };
     let status = status_result?;
 
     let stopping = bridge_stop.load(Ordering::Acquire);
     let client_closed = client_closed.load(Ordering::Acquire);
+    if child_exited && !status.success() && !stopping && !client_closed {
+        return Err(ssh_bridge_exit_error(status, &stderr));
+    }
     if !stopping && !client_closed {
         upload_result.map_err(|err| {
             io::Error::new(err.kind(), format!("remote bridge upload failed: {err}"))
@@ -2148,10 +2181,31 @@ fn bridge_connection(
     if status.success() || stopping || client_closed {
         Ok(())
     } else {
-        Err(io::Error::new(
-            io::ErrorKind::ConnectionAborted,
-            format!("ssh bridge exited with {status}"),
-        ))
+        Err(ssh_bridge_exit_error(status, &stderr))
+    }
+}
+
+fn ssh_bridge_exit_error(status: std::process::ExitStatus, stderr: &[u8]) -> io::Error {
+    let stderr = String::from_utf8_lossy(stderr);
+    let stderr = stderr.trim();
+    let message = if stderr.is_empty() {
+        format!("ssh bridge exited with {status}")
+    } else {
+        format!("remote SSH connection failed: {stderr}")
+    };
+    io::Error::new(io::ErrorKind::ConnectionAborted, message)
+}
+
+fn capture_ssh_stderr(mut stderr: impl io::Read) -> io::Result<Vec<u8>> {
+    let mut captured = Vec::new();
+    let mut buffer = [0_u8; 4 * 1024];
+    loop {
+        let read = stderr.read(&mut buffer)?;
+        if read == 0 {
+            return Ok(captured);
+        }
+        let remaining = NONINTERACTIVE_SSH_STDERR_LIMIT.saturating_sub(captured.len());
+        captured.extend_from_slice(&buffer[..read.min(remaining)]);
     }
 }
 
@@ -2700,6 +2754,13 @@ mod tests {
             ssh_config_include_path(Path::new(r"C:\Users\A B\.ssh\config")),
             r#""C:/Users/A B/.ssh/config""#
         );
+    }
+
+    #[test]
+    fn noninteractive_ssh_stderr_capture_is_bounded() {
+        let stderr = vec![b'x'; NONINTERACTIVE_SSH_STDERR_LIMIT + 4096];
+        let captured = capture_ssh_stderr(stderr.as_slice()).expect("capture stderr");
+        assert_eq!(captured.len(), NONINTERACTIVE_SSH_STDERR_LIMIT);
     }
 
     #[test]

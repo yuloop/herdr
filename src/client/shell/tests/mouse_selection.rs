@@ -257,10 +257,11 @@ fn client_double_click_selects_and_copies_endpoint_row_word() {
         })
     };
 
-    state.handle_raw_events(vec![click()]);
-    state.handle_raw_events(vec![release()]);
-    let second = state.handle_raw_events(vec![click()]);
-    let ClientShellAction::Endpoint { request, .. } = second
+        state.handle_raw_events(vec![click()]);
+        state.handle_raw_events(vec![release()]);
+        assert!(state.selection.is_none(), "plain clicks must not select");
+        let second = state.handle_raw_events(vec![click()]);
+        let ClientShellAction::Endpoint { request, .. } = second
         .actions
         .iter()
         .find(|action| {
@@ -274,48 +275,79 @@ fn client_double_click_selects_and_copies_endpoint_row_word() {
     else {
         unreachable!()
     };
-    let word_request_id = request.id.clone();
-    assert!(matches!(
-        &request.method,
-        crate::api::schema::Method::PaneSelectionRead(params)
-            if params.anchor == crate::api::schema::PaneTextPoint { row: 0, col: 0 }
-                && params.cursor == crate::api::schema::PaneTextPoint { row: 0, col: 3 }
-    ));
+        let word_request_id = request.id.clone();
+        assert!(matches!(
+            &request.method,
+            crate::api::schema::Method::PaneSelectionRead(params)
+                if params.anchor == crate::api::schema::PaneTextPoint { row: 0, col: 0 }
+                    && params.cursor == crate::api::schema::PaneTextPoint { row: 0, col: 3 }
+        ));
 
-    let (repaint, actions) = state.handle_endpoint_result(
-        "boot-1",
-        &word_request_id,
-        Ok(crate::api::schema::ResponseResult::PaneSelection {
-            pane_id: "pane_1".into(),
-            text: "LIVE".into(),
-        }),
-    );
-    assert!(repaint);
-    assert!(state
-        .selection
-        .as_ref()
-        .is_some_and(crate::selection::Selection::is_finalized));
-    let [ClientShellAction::Endpoint { request, .. }] = &actions[..] else {
-        panic!("auto-copy should read the selected word");
-    };
-    let copy_request_id = request.id.clone();
-    assert!(matches!(
-        &request.method,
-        crate::api::schema::Method::PaneSelectionRead(params)
-            if params.anchor.col == 0 && params.cursor.col == 3
-    ));
-    let (_, actions) = state.handle_endpoint_result(
-        "boot-1",
-        &copy_request_id,
-        Ok(crate::api::schema::ResponseResult::PaneSelection {
-            pane_id: "pane_1".into(),
-            text: "LIVE".into(),
-        }),
-    );
-    assert!(matches!(
-        &actions[..],
-        [ClientShellAction::ClipboardWrite(bytes)] if bytes == b"LIVE"
-    ));
+        if release_before_response {
+            let released = state.handle_raw_events(vec![release()]);
+            assert!(released.actions.is_empty());
+        }
+        let (repaint, actions) = state.handle_endpoint_result(
+            "boot-1",
+            &word_request_id,
+            Ok(crate::api::schema::ResponseResult::PaneSelection {
+                pane_id: "pane_1".into(),
+                text: "LIVE".into(),
+            }),
+        );
+        assert!(repaint);
+        assert!(state
+            .selection
+            .as_ref()
+            .is_some_and(crate::selection::Selection::is_finalized));
+        let deadline = state.selection_highlight_clear_deadline;
+        if !release_before_response {
+            let released = state.handle_raw_events(vec![release()]);
+            assert!(released.actions.is_empty(), "release must not copy twice");
+        }
+        assert!(
+            state.selection.as_ref().is_some_and(crate::selection::Selection::is_finalized),
+            "mouse release must retain the finalized word selection (copy_on_select={copy_on_select})"
+        );
+        assert_eq!(
+            state.selection.as_ref().unwrap().ordered_cells(),
+            ((0, 0), (0, 3))
+        );
+        assert_eq!(state.selection_highlight_clear_deadline, deadline);
+        if !copy_on_select {
+            assert!(actions.is_empty(), "manual selection must not auto-copy");
+            assert!(state.selection_highlight_clear_deadline.is_none());
+            state.tick_copy_feedback(std::time::Instant::now() + std::time::Duration::from_secs(1));
+            assert!(
+                state.selection.is_some(),
+                "manual selection must not expire"
+            );
+            continue;
+        }
+        let [ClientShellAction::Endpoint { request, .. }] = &actions[..] else {
+            panic!("auto-copy should read the selected word");
+        };
+        let copy_request_id = request.id.clone();
+        assert!(matches!(
+            &request.method,
+            crate::api::schema::Method::PaneSelectionRead(params)
+                if params.anchor.col == 0 && params.cursor.col == 3
+        ));
+        let (_, actions) = state.handle_endpoint_result(
+            "boot-1",
+            &copy_request_id,
+            Ok(crate::api::schema::ResponseResult::PaneSelection {
+                pane_id: "pane_1".into(),
+                text: "LIVE".into(),
+            }),
+        );
+        assert!(matches!(
+            &actions[..],
+            [ClientShellAction::ClipboardWrite(bytes)] if bytes == b"LIVE"
+        ));
+        assert!(state.tick_copy_feedback(deadline.expect("auto-copy highlight deadline")));
+        assert!(state.selection.is_none());
+    }
 }
 
 #[test]

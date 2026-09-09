@@ -1727,7 +1727,11 @@ impl ClientShellState {
             {
                 self.request_selection_copy(outcome, false);
                 self.selection = None;
-            } else if !copied {
+            } else if self
+                .selection
+                .as_ref()
+                .is_some_and(crate::selection::Selection::is_just_click)
+            {
                 self.selection = None;
             }
             if copied {

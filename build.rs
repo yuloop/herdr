@@ -83,6 +83,15 @@ fn main() {
         .arg(format!("-Dtarget={zig_target}"))
         .arg(format!("-Dversion-string={version_string}"))
         .arg("-Demit-xcframework=false");
+    if target.ends_with("windows-msvc") {
+        if let Some(libc_file) = env::var_os("LIBGHOSTTY_VT_WINDOWS_LIBC") {
+            println!(
+                "cargo:rerun-if-changed={}",
+                PathBuf::from(&libc_file).display()
+            );
+            command.arg("--libc").arg(libc_file);
+        }
+    }
     if let Ok(system_dir) = env::var("LIBGHOSTTY_VT_ZIG_SYSTEM_DIR") {
         command.arg("--system").arg(system_dir);
     }
@@ -95,8 +104,7 @@ fn main() {
                 panic!(
                     "zig executable not found (looked for {zig:?}; set the ZIG \
                      environment variable to point at the zig binary). Building \
-                     the vendored libghostty-vt requires Zig 0.15.2: on macOS run \
-                     `brew install zig@0.15`, elsewhere install it from \
+                     the vendored libghostty-vt requires Zig 0.16.0: install it from \
                      https://ziglang.org/download/, then retry the build"
                 );
             }

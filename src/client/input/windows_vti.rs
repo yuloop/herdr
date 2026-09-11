@@ -2546,6 +2546,31 @@ mod tests {
     }
 
     #[test]
+    fn vti_altgr_dead_key_preserves_native_record_without_command_modifiers() {
+        // AltGr+4 press captured in #3948, Spanish ISO layout.
+        let record = WindowsKeyRecord {
+            key_down: true,
+            repeat_count: 1,
+            virtual_key_code: 52,
+            virtual_scan_code: 5,
+            unicode: 0,
+            control_key_state: 9,
+        };
+        let events = translate_with_provenance(win32_input_mode_encoded_record(record));
+        assert_eq!(
+            events,
+            vec![crate::protocol::ClientInputEvent::Key {
+                code: crate::protocol::ClientKeyCode::Char('4'),
+                modifiers: 0,
+                kind: crate::protocol::ClientKeyKind::Press,
+                repeat_count: 1,
+                generated_text: None,
+                source: crate::protocol::ClientKeySource::WindowsConsole { record },
+            }]
+        );
+    }
+
+    #[test]
     fn vti_us_international_dead_key_only_emits_composed_text() {
         fn encode_for_kitty(events: Vec<crate::protocol::ClientInputEvent>, flags: u16) -> Vec<u8> {
             events

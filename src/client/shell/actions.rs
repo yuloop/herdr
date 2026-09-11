@@ -292,54 +292,6 @@ impl ClientShellState {
         );
     }
 
-    pub(super) fn request_word_selection(
-        &mut self,
-        hit: &PaneHit,
-        viewport_row: u16,
-        col: u16,
-        outcome: &mut ClientShellInput,
-    ) {
-        let absolute_row = crate::selection::absolute_row_for_viewport(viewport_row, hit.scroll);
-        let content_revision = self
-            .pane_surface
-            .as_ref()
-            .and_then(|surface| {
-                surface
-                    .panes
-                    .iter()
-                    .find(|pane| pane.pane_id == hit.pane_id)
-            })
-            .map(|pane| pane.content_revision);
-        self.word_selection_generation = self.word_selection_generation.saturating_add(1);
-        let generation = self.word_selection_generation;
-        self.pending_word_selection = Some(generation);
-        if !self.push_endpoint_method_with_kind(
-            crate::api::schema::Method::PaneSelectionRead(
-                crate::api::schema::PaneSelectionReadParams {
-                    pane_id: hit.pane_id.clone(),
-                    anchor: crate::api::schema::PaneTextPoint {
-                        row: absolute_row,
-                        col: 0,
-                    },
-                    cursor: crate::api::schema::PaneTextPoint {
-                        row: absolute_row,
-                        col: hit.inner_rect.width.saturating_sub(1),
-                    },
-                    content_revision,
-                },
-            ),
-            PendingEndpointKind::WordSelection {
-                pane_id: hit.pane_id.clone(),
-                absolute_row,
-                col,
-                generation,
-            },
-            outcome,
-        ) {
-            self.pending_word_selection = None;
-        }
-    }
-
     pub(super) fn push_endpoint_method(
         &mut self,
         method: crate::api::schema::Method,
@@ -667,7 +619,6 @@ impl ClientShellState {
             PendingEndpointKind::WordSelection {
                 pane_id,
                 absolute_row,
-                col,
                 generation,
             } => {
                 if self.pending_word_selection != Some(generation)

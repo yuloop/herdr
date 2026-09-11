@@ -81,7 +81,7 @@ jobs:
         # build.rs 的 vendored libghostty-vt 在 Linux/Windows 都需要 zig（上游同款逻辑）
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
       - name: Install Linux build tools
         if: runner.os == 'Linux'
         run: |

@@ -4,9 +4,9 @@ use super::{args::*, process::wait_with_output_timeout, restart_policy::*, shell
 use base64::Engine as _;
 use std::collections::BTreeMap;
 use std::fs::{self, File};
-use std::io::{self, IsTerminal, Write as _};
+use std::io::{self, IsTerminal, Read as _, Write as _};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 
 use interprocess::local_socket::traits::Listener as _;
 #[cfg(all(test, unix))]
@@ -594,6 +594,13 @@ impl RemoteSsh {
             .stderr(Stdio::piped())
             .spawn()?;
 
+        if !self.noninteractive {
+            return normalize_remote_output(output_with_forwarded_stderr(
+                child,
+                Some(script.as_bytes()),
+            )?);
+        }
+
         let write_result = if let Some(mut stdin) = child.stdin.take() {
             stdin.write_all(script.as_bytes())
         } else {
@@ -602,11 +609,7 @@ impl RemoteSsh {
                 "ssh bootstrap stdin missing",
             ))
         };
-        let output = if self.noninteractive {
-            wait_with_output_timeout(child, NONINTERACTIVE_SSH_COMMAND_TIMEOUT)?
-        } else {
-            child.wait_with_output()?
-        };
+        let output = wait_with_output_timeout(child, NONINTERACTIVE_SSH_COMMAND_TIMEOUT)?;
         write_result?;
         normalize_remote_output(output)
     }
@@ -623,7 +626,7 @@ impl RemoteSsh {
         let output = if self.noninteractive {
             wait_with_output_timeout(command.spawn()?, NONINTERACTIVE_SSH_COMMAND_TIMEOUT)
         } else {
-            command.output()
+            output_with_forwarded_stderr(command.spawn()?, None)
         }?;
         normalize_remote_output(output)
     }
@@ -683,6 +686,55 @@ impl RemoteSsh {
             )))
         }
     }
+}
+
+// Only interactive setup uses this relay. Background probes retain their
+// capture-only timeout path so SSH diagnostics cannot overwrite the active TUI.
+fn output_with_forwarded_stderr(mut child: Child, stdin: Option<&[u8]>) -> io::Result<Output> {
+    let mut child_stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "ssh command stderr missing"))?;
+    let stderr_relay = thread::spawn(move || -> io::Result<Vec<u8>> {
+        let mut captured = Vec::new();
+        let mut buffer = [0_u8; 8 * 1024];
+        let mut destination = io::stderr();
+
+        loop {
+            let read = child_stderr.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            captured.extend_from_slice(&buffer[..read]);
+            if destination.write_all(&buffer[..read]).is_ok() {
+                let _ = destination.flush();
+            }
+        }
+
+        Ok(captured)
+    });
+
+    let write_result = if let Some(bytes) = stdin {
+        if let Some(mut child_stdin) = child.stdin.take() {
+            child_stdin.write_all(bytes)
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "ssh bootstrap stdin missing",
+            ))
+        }
+    } else {
+        Ok(())
+    };
+    let output_result = child.wait_with_output();
+    let stderr_result = stderr_relay
+        .join()
+        .map_err(|_| io::Error::other("ssh stderr relay panicked"))?;
+
+    let mut output = output_result?;
+    write_result?;
+    output.stderr = stderr_result?;
+    Ok(output)
 }
 
 fn normalize_remote_output(mut output: Output) -> io::Result<Output> {

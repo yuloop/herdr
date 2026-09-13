@@ -64,6 +64,10 @@ fn main() {
         .trim()
         .to_string();
 
+    if env::var("HERDR_SKIP_VENDORED_ZIG_BUILD").ok().as_deref() == Some("1") {
+        return;
+    }
+
     let zig = env::var("ZIG").unwrap_or_else(|_| "zig".into());
     let mut command = Command::new(&zig);
     if cfg!(windows) {

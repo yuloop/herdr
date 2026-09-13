@@ -36,16 +36,24 @@ lint:
 
 # Run PR CI checks
 ci filter='all()': lint
+    just ci-tests "{{filter}}"
+
+# Keep the test build independently configurable from clippy in CI.
+ci-tests filter='all()':
     cargo nextest run --locked -E "{{filter}}" --status-level fail --final-status-level slow --failure-output final --success-output never
     just maintenance-test
     just ui-hot-path-architecture-test
     just integration-assets-test
 
+# Download the Windows SDK once (requires xwin; prompts for Microsoft's SDK license)
+[unix]
+setup-windows-cross *args:
+    {{python}} scripts/windows_cross.py setup {{args}}
+
 # Run Windows target lint from Unix/macOS to catch cfg(windows) compile and clippy failures before CI
 [unix]
 windows-lint:
-    rustup target add x86_64-pc-windows-msvc
-    LIBGHOSTTY_VT_SIMD=false cargo clippy --bin herdr --locked --target x86_64-pc-windows-msvc -- -D warnings
+    {{python}} scripts/windows_cross.py lint
 
 # Check formatting + run unit tests + Windows target lint + documentation contract tests
 [unix]

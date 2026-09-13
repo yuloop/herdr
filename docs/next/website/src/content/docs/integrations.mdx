@@ -24,6 +24,7 @@ herdr integration install hermes
 herdr integration install qwen
 herdr integration install qodercli
 herdr integration install qwen
+herdr integration install letta
 herdr integration install cursor
 herdr integration install mastracode
 herdr integration install antigravity-cli
@@ -47,6 +48,7 @@ herdr integration uninstall hermes
 herdr integration uninstall qwen
 herdr integration uninstall qodercli
 herdr integration uninstall qwen
+herdr integration uninstall letta
 herdr integration uninstall cursor
 herdr integration uninstall mastracode
 herdr integration uninstall antigravity-cli
@@ -138,6 +140,8 @@ herdr integration install claude
 ```
 
 The hook reports Claude Code session identity to the local Herdr socket on session start. Claude Code state comes from Herdr's screen manifest detection.
+
+Claude integration v10 matches only the documented `SessionStart` sources: `startup`, `resume`, `clear`, `compact`, and `fork`. This prevents Grok's `new` and `load` events from launching the imported Herdr Claude hook, without disabling unrelated Claude-compatible hooks. Reinstall the Claude integration after upgrading to migrate the previous wildcard matcher. New Claude source values require an integration update.
 
 Herdr uses `~/.claude` by default, or `CLAUDE_CONFIG_DIR` when set. The Claude config directory must already exist. Install writes `hooks/herdr-agent-state.sh` and updates `settings.json` with Herdr hook entries. Uninstall removes the matching hook entries and deletes the hook script.
 
@@ -292,6 +296,20 @@ The `SessionStart` hook reports only Qwen Code's session identity for native res
 Herdr uses `~/.qwen` by default, or `QWEN_HOME` when set. The Qwen config directory must already exist. Install writes `hooks/herdr-agent-session.sh` (`hooks/herdr-agent-session.ps1` on Windows) and adds a Herdr entry to `settings.json`. Uninstall removes only the matching entry and managed script.
 
 Herdr resumes stored Qwen Code sessions with `qwen --resume <id>`.
+
+## Letta Code
+
+Install the Letta Code hook:
+
+```bash
+herdr integration install letta
+```
+
+The quiet `SessionStart` hook reports the conversation ID for native restore. Letta Code state still comes from Herdr's screen manifest detection.
+
+Herdr uses `~/.letta`. The config directory must already exist. Install writes `hooks/herdr-agent-session.sh` (`hooks/herdr-agent-session.ps1` on Windows) and adds a Herdr entry to `settings.json`. Uninstall removes only the matching entry and managed script.
+
+Herdr resumes named conversations with `letta --conversation <id>`. It records the default conversation as `default:<agent-id>` and resumes it with `letta --conversation default --agent <agent-id>`.
 
 ## Cursor Agent CLI
 

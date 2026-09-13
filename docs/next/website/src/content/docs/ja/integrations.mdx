@@ -27,6 +27,7 @@ herdr integration install mastracode
 herdr integration install qwen
 herdr integration install qodercli
 herdr integration install qwen
+herdr integration install letta
 herdr integration install cursor
 herdr integration install antigravity-cli
 herdr integration install grok
@@ -50,6 +51,7 @@ herdr integration uninstall mastracode
 herdr integration uninstall qwen
 herdr integration uninstall qodercli
 herdr integration uninstall qwen
+herdr integration uninstall letta
 herdr integration uninstall cursor
 herdr integration uninstall antigravity-cli
 herdr integration uninstall grok
@@ -140,6 +142,8 @@ herdr integration install claude
 ```
 
 このフックは、セッション開始時に Claude Code のセッション識別をローカルの Herdr ソケットに報告します。Claude Code の状態は Herdr のスクリーンマニフェスト検出から得られます。
+
+Claude 統合 v10 は、文書化された `SessionStart` の source 値 `startup`、`resume`、`clear`、`compact`、`fork` のみに一致します。これにより、ほかの Claude 互換フックを無効にせずに、Grok の `new` と `load` イベントがインポートされた Herdr の Claude フックを起動するのを防ぎます。アップグレード後に Claude 統合を再インストールして、従来のワイルドカードマッチャーを移行してください。Claude に新しい source 値が追加された場合は、統合の更新が必要です。
 
 Herdr はデフォルトで `~/.claude` を使い、`CLAUDE_CONFIG_DIR` が設定されていればそちらを使います。Claude の設定ディレクトリはあらかじめ存在している必要があります。インストールは `hooks/herdr-agent-state.sh` を書き込み、`settings.json` に Herdr のフックエントリを追加します。アンインストールは一致するフックエントリを削除し、フックスクリプトを削除します。
 
@@ -294,6 +298,20 @@ herdr integration install qwen
 Herdr はデフォルトで `~/.qwen` を使い、`QWEN_HOME` が設定されていればそちらを使います。Qwen の設定ディレクトリはあらかじめ存在している必要があります。インストールは `hooks/herdr-agent-session.sh`（Windows では `hooks/herdr-agent-session.ps1`）を書き込み、`settings.json` に Herdr エントリを追加します。アンインストールは一致するエントリと管理対象スクリプトだけを削除します。
 
 Herdr は保存された Qwen Code セッションを `qwen --resume <id>` で resume します。
+
+## Letta Code
+
+Letta Code フックをインストールします:
+
+```bash
+herdr integration install letta
+```
+
+静かな `SessionStart` フックは、ネイティブ復元用の会話 ID を報告します。Letta Code の状態は引き続き Herdr のスクリーンマニフェスト検出から得られます。
+
+Herdr は `~/.letta` を使います。設定ディレクトリはあらかじめ存在している必要があります。インストールは `hooks/herdr-agent-session.sh`（Windows では `hooks/herdr-agent-session.ps1`）を書き込み、`settings.json` に Herdr エントリを追加します。アンインストールは一致するエントリと管理対象スクリプトだけを削除します。
+
+Herdr は名前付き会話を `letta --conversation <id>` で resume します。デフォルト会話は `default:<agent-id>` として記録し、`letta --conversation default --agent <agent-id>` で resume します。
 
 ## Cursor Agent CLI
 

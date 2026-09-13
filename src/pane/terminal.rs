@@ -542,6 +542,19 @@ impl PaneTerminal {
         self.ghostty.visible_hyperlinks(area)
     }
 
+    pub(crate) fn link_regions_at(
+        &self,
+        col: u16,
+        row: u16,
+        resolve: fn(&str, usize) -> Option<std::ops::Range<usize>>,
+    ) -> Vec<crate::api::schema::PaneLinkRegion> {
+        self.ghostty.link_regions_at(col, row, resolve)
+    }
+
+    pub(crate) fn link_target_at(&self, col: u16, row: u16) -> Option<crate::ghostty::LinkTarget> {
+        self.ghostty.link_target_at(col, row)
+    }
+
     pub(crate) fn kitty_graphics_may_have_placements(&self) -> bool {
         self.ghostty.kitty_graphics_may_have_placements()
     }
@@ -2204,6 +2217,33 @@ impl GhosttyPaneTerminal {
             .ok()
             .and_then(|mut core| ghostty_recent_ansi_snapshot(&mut core, lines, true).ok())
             .unwrap_or_default()
+    }
+
+    pub(crate) fn link_regions_at(
+        &self,
+        col: u16,
+        row: u16,
+        resolve: fn(&str, usize) -> Option<std::ops::Range<usize>>,
+    ) -> Vec<crate::api::schema::PaneLinkRegion> {
+        self.core
+            .lock()
+            .ok()
+            .and_then(|core| {
+                core.terminal
+                    .viewport_link_regions(col, u32::from(row), resolve)
+                    .ok()
+            })
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn link_target_at(&self, col: u16, row: u16) -> Option<crate::ghostty::LinkTarget> {
+        self.core
+            .lock()
+            .ok()?
+            .terminal
+            .viewport_link_target(col, u32::from(row))
+            .ok()
+            .flatten()
     }
 
     pub fn extract_selection(&self, selection: &crate::selection::Selection) -> Option<String> {

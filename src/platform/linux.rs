@@ -1,6 +1,6 @@
 use std::{
     collections::{HashSet, VecDeque},
-    io::Write,
+    io::{Read, Write},
     os::fd::RawFd,
     path::PathBuf,
     process::{Command, Stdio},
@@ -24,6 +24,50 @@ pub(crate) use super::unix_common::{
 const WSL_MARKER_ENV_VARS: &[&str] = &["WSL_DISTRO_NAME", "WSL_INTEROP"];
 const PROCESS_DETECTION_ENV_VAR: &str = "HERDR_PROCESS_DETECTION";
 const CHILD_GROUPS_SCAN_LIMIT: usize = 64;
+/// Upper bound on the number of processes visited while resolving a pane's
+/// foreground process-group tree. Foreground-job detection reads /proc/<pid>/stat
+/// and task/children files for every visited process on a repeated (per-tick/5s)
+/// cadence, so an unbounded walk lets accumulated descendants or unreaped zombies
+/// under the pane shell grow the server's read-syscall rate and CPU without limit
+/// at a constant pane count (see AGENTS.md multiplicative performance paths). The
+/// foreground-group leader's subtree and the pane shell's descendants advance
+/// round-robin under a shared candidate ceiling, with independent per-root work
+/// budgets, so a pathologically large accumulation on either side cannot starve the
+/// other. Discovery is best effort once a budget is exhausted.
+const FOREGROUND_TREE_SCAN_LIMIT: usize = 512;
+/// Number of `/proc/<pid>/task` entries a root's subtree may consume, bounding how
+/// far one process's thread count can multiply the walk's work.
+const FOREGROUND_TASK_ENTRY_LIMIT: usize = 2_048;
+/// Number of `/proc/<pid>/task/<tid>/children` bytes a root's subtree may read,
+/// stopping a parent that accumulates unreaped children from growing read work
+/// without limit.
+const FOREGROUND_CHILD_BYTE_LIMIT: usize = 128 * 1024;
+/// Aggregate number of child pids a root's subtree may parse and enqueue, bounding
+/// the walk's pending queues and allocations.
+const FOREGROUND_CHILD_PID_LIMIT: usize = 2_048;
+
+/// Per-root work budget for foreground process discovery. The foreground-group
+/// leader and the pane shell each get their own budget, so one side's expansion
+/// cannot exhaust the other's allowance. Every task entry, child byte, and parsed
+/// child pid is charged against the owning root's budget, keeping total `/proc` work
+/// bounded independently of the process-tree size and of uptime. Discovery is best
+/// effort once a budget is exhausted.
+#[derive(Debug)]
+struct ForegroundScanBudget {
+    task_entries: usize,
+    child_bytes: usize,
+    child_pids: usize,
+}
+
+impl ForegroundScanBudget {
+    fn for_probe() -> Self {
+        Self {
+            task_entries: FOREGROUND_TASK_ENTRY_LIMIT,
+            child_bytes: FOREGROUND_CHILD_BYTE_LIMIT,
+            child_pids: FOREGROUND_CHILD_PID_LIMIT,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProcessDetectionMode {
@@ -36,6 +80,26 @@ struct ProcGroupMember {
     pid: u32,
     comm: String,
     state: char,
+}
+
+pub(crate) fn launch_executable() -> std::io::Result<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let executable = std::env::current_exe()?;
+    if !executable.is_file() {
+        // Linux marks the old inode as deleted after an update replaces the binary.
+        if let Some(path) = executable
+            .as_os_str()
+            .as_bytes()
+            .strip_suffix(b" (deleted)")
+        {
+            let replacement = PathBuf::from(std::ffi::OsStr::from_bytes(path));
+            if replacement.is_file() {
+                return Ok(replacement);
+            }
+        }
+    }
+    Ok(executable)
 }
 
 pub fn raise_server_nofile_limit() {}
@@ -222,14 +286,15 @@ fn child_groups_foreground_process_group(child_pid: u32) -> Option<u32> {
 fn child_groups_foreground_process_group_with(
     child_pid: u32,
     shell_group_id: u32,
-    mut task_ids: impl FnMut(u32) -> Vec<u32>,
-    mut task_children: impl FnMut(u32, u32) -> Vec<u32>,
+    mut task_ids: impl FnMut(u32, &mut ForegroundScanBudget) -> Vec<u32>,
+    mut task_children: impl FnMut(u32, u32, &mut ForegroundScanBudget) -> Vec<u32>,
     mut process_group_id: impl FnMut(u32) -> Option<i32>,
 ) -> Option<u32> {
+    let mut budget = ForegroundScanBudget::for_probe();
     let mut newest = None;
     let mut scanned = 0usize;
-    for tid in task_ids(child_pid) {
-        for child in task_children(child_pid, tid) {
+    for tid in task_ids(child_pid, &mut budget) {
+        for child in task_children(child_pid, tid, &mut budget) {
             if scanned >= CHILD_GROUPS_SCAN_LIMIT {
                 return None;
             }
@@ -267,11 +332,14 @@ fn foreground_process_group_members(
 fn foreground_process_group_members_with(
     child_pid: u32,
     process_group_id: u32,
-    task_ids: impl FnMut(u32) -> Vec<u32>,
-    task_children: impl FnMut(u32, u32) -> Vec<u32>,
+    task_ids: impl FnMut(u32, &mut ForegroundScanBudget) -> Vec<u32>,
+    task_children: impl FnMut(u32, u32, &mut ForegroundScanBudget) -> Vec<u32>,
     mut live_member: impl FnMut(u32, u32) -> Option<ProcGroupMember>,
 ) -> Option<Vec<ProcGroupMember>> {
-    let mut members = process_tree_pids([child_pid, process_group_id], task_ids, task_children)
+    // The leader is passed first; `process_tree_pids` advances both roots round-robin
+    // so a truncated scan cannot let the pane shell's unrelated descendants starve
+    // the foreground group, or vice versa.
+    let mut members = process_tree_pids([process_group_id, child_pid], task_ids, task_children)
         .into_iter()
         .filter_map(|pid| live_member(process_group_id, pid))
         .collect::<Vec<_>>();
@@ -281,49 +349,132 @@ fn foreground_process_group_members_with(
 
 fn process_tree_pids(
     roots: impl IntoIterator<Item = u32>,
-    mut task_ids: impl FnMut(u32) -> Vec<u32>,
-    mut task_children: impl FnMut(u32, u32) -> Vec<u32>,
+    mut task_ids: impl FnMut(u32, &mut ForegroundScanBudget) -> Vec<u32>,
+    mut task_children: impl FnMut(u32, u32, &mut ForegroundScanBudget) -> Vec<u32>,
 ) -> Vec<u32> {
-    let mut pending = VecDeque::new();
     let mut visited = HashSet::new();
-    for pid in roots {
-        if pid > 0 && visited.insert(pid) {
-            pending.push_back(pid);
+    let mut pids = Vec::new();
+    // Keep one breadth-first frontier with its own work budget per root, so a large
+    // expansion on one side cannot consume the other side's allowance. Frontier turns
+    // advance round-robin, sharing the candidate ceiling between the foreground-group
+    // leader's subtree and the pane shell's descendants.
+    struct Frontier {
+        pending: VecDeque<u32>,
+        budget: ForegroundScanBudget,
+    }
+    let mut frontiers: Vec<Frontier> = Vec::new();
+    for root in roots {
+        if root > 0 && visited.insert(root) {
+            frontiers.push(Frontier {
+                pending: VecDeque::from([root]),
+                budget: ForegroundScanBudget::for_probe(),
+            });
         }
     }
 
-    let mut pids = Vec::new();
-    while let Some(pid) = pending.pop_front() {
-        pids.push(pid);
-        for tid in task_ids(pid) {
-            for child_pid in task_children(pid, tid) {
-                if child_pid > 0 && visited.insert(child_pid) {
-                    pending.push_back(child_pid);
+    loop {
+        let mut progressed = false;
+        for frontier in &mut frontiers {
+            if pids.len() >= FOREGROUND_TREE_SCAN_LIMIT {
+                return pids;
+            }
+            let Some(pid) = frontier.pending.pop_front() else {
+                continue;
+            };
+            progressed = true;
+            pids.push(pid);
+            for tid in task_ids(pid, &mut frontier.budget) {
+                for child_pid in task_children(pid, tid, &mut frontier.budget) {
+                    if child_pid > 0 && visited.insert(child_pid) {
+                        frontier.pending.push_back(child_pid);
+                    }
                 }
             }
         }
+        if !progressed {
+            return pids;
+        }
     }
+}
+
+fn process_task_ids(pid: u32, budget: &mut ForegroundScanBudget) -> Vec<u32> {
+    let mut ids = Vec::new();
+    let Ok(entries) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
+        return ids;
+    };
+    for entry in entries.flatten() {
+        if budget.task_entries == 0 {
+            break;
+        }
+        budget.task_entries -= 1;
+        if let Some(tid) = numeric_file_name(&entry) {
+            ids.push(tid);
+        }
+    }
+    ids
+}
+
+fn process_task_children(pid: u32, tid: u32, budget: &mut ForegroundScanBudget) -> Vec<u32> {
+    if budget.child_bytes == 0 || budget.child_pids == 0 {
+        return Vec::new();
+    }
+    let Ok(file) = std::fs::File::open(format!("/proc/{pid}/task/{tid}/children")) else {
+        return Vec::new();
+    };
+    read_bounded_pid_list(file, budget)
+}
+
+/// Read a whitespace-separated pid list, charging the shared budget for every byte
+/// read and every parsed pid. A token cut off by the byte budget is discarded so a
+/// partial value is never parsed as a different pid; the final token is only kept
+/// when the reader reaches end-of-file.
+fn read_bounded_pid_list(mut reader: impl Read, budget: &mut ForegroundScanBudget) -> Vec<u32> {
+    let mut pids = Vec::new();
+    let mut token = Vec::new();
+    let mut buffer = [0_u8; 4096];
+
+    while budget.child_bytes > 0 && budget.child_pids > 0 {
+        let read_len = budget.child_bytes.min(buffer.len());
+        let bytes_read = match reader.read(&mut buffer[..read_len]) {
+            Ok(0) => {
+                push_pid_token(&mut pids, &mut token, budget);
+                return pids;
+            }
+            Ok(bytes_read) => bytes_read,
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return pids,
+        };
+        budget.child_bytes -= bytes_read;
+        for &byte in &buffer[..bytes_read] {
+            if byte.is_ascii_digit() {
+                token.push(byte);
+                continue;
+            }
+            push_pid_token(&mut pids, &mut token, budget);
+            if budget.child_pids == 0 {
+                return pids;
+            }
+        }
+    }
+
+    // The byte budget ran out mid-stream: drop the trailing token in case the read
+    // truncated it.
     pids
 }
 
-fn process_task_ids(pid: u32) -> Vec<u32> {
-    std::fs::read_dir(format!("/proc/{pid}/task"))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| numeric_file_name(&entry))
-        .collect()
-}
-
-fn process_task_children(pid: u32, tid: u32) -> Vec<u32> {
-    let Some(children) = std::fs::read_to_string(format!("/proc/{pid}/task/{tid}/children")).ok()
-    else {
-        return Vec::new();
-    };
-    children
-        .split_whitespace()
-        .filter_map(|child| child.parse::<u32>().ok())
-        .collect()
+fn push_pid_token(pids: &mut Vec<u32>, token: &mut Vec<u8>, budget: &mut ForegroundScanBudget) {
+    if token.is_empty() || budget.child_pids == 0 {
+        token.clear();
+        return;
+    }
+    if let Some(pid) = std::str::from_utf8(token)
+        .ok()
+        .and_then(|text| text.parse::<u32>().ok())
+    {
+        budget.child_pids -= 1;
+        pids.push(pid);
+    }
+    token.clear();
 }
 
 fn numeric_file_name(entry: &std::fs::DirEntry) -> Option<u32> {
@@ -920,8 +1071,8 @@ mod tests {
         let group = child_groups_foreground_process_group_with(
             100,
             100,
-            |pid| tasks.get(&pid).cloned().unwrap_or_default(),
-            |pid, tid| children.get(&(pid, tid)).cloned().unwrap_or_default(),
+            |pid, _budget| tasks.get(&pid).cloned().unwrap_or_default(),
+            |pid, tid, _budget| children.get(&(pid, tid)).cloned().unwrap_or_default(),
             |pid| groups.get(&pid).copied(),
         );
 
@@ -937,8 +1088,8 @@ mod tests {
         let group = child_groups_foreground_process_group_with(
             100,
             90,
-            |pid| tasks.get(&pid).cloned().unwrap_or_default(),
-            |pid, tid| children.get(&(pid, tid)).cloned().unwrap_or_default(),
+            |pid, _budget| tasks.get(&pid).cloned().unwrap_or_default(),
+            |pid, tid, _budget| children.get(&(pid, tid)).cloned().unwrap_or_default(),
             |pid| groups.get(&pid).copied(),
         );
 
@@ -954,8 +1105,8 @@ mod tests {
         let group = child_groups_foreground_process_group_with(
             100,
             90,
-            |pid| tasks.get(&pid).cloned().unwrap_or_default(),
-            |pid, tid| children.get(&(pid, tid)).cloned().unwrap_or_default(),
+            |pid, _budget| tasks.get(&pid).cloned().unwrap_or_default(),
+            |pid, tid, _budget| children.get(&(pid, tid)).cloned().unwrap_or_default(),
             |pid| groups.get(&pid).copied(),
         );
 
@@ -970,8 +1121,8 @@ mod tests {
         let group = child_groups_foreground_process_group_with(
             100,
             100,
-            |_| vec![100],
-            |_, _| children.clone(),
+            |_, _budget| vec![100],
+            |_, _, _budget| children.clone(),
             |pid| {
                 inspected += 1;
                 Some(pid as i32)
@@ -1016,11 +1167,11 @@ mod tests {
         let members = foreground_process_group_members_with(
             100,
             200,
-            |pid| {
+            |pid, _budget| {
                 task_reads.borrow_mut().push(pid);
                 tasks.get(&pid).cloned().unwrap_or_default()
             },
-            |pid, tid| {
+            |pid, tid, _budget| {
                 child_reads.borrow_mut().push((pid, tid));
                 children.get(&(pid, tid)).cloned().unwrap_or_default()
             },
@@ -1055,12 +1206,171 @@ mod tests {
     }
 
     #[test]
+    fn foreground_tree_traversal_is_bounded_by_the_scan_limit() {
+        // A pane shell whose descendant tree is far larger than the bound (long-lived
+        // agents accumulating children or unreaped zombies) must not make foreground
+        // detection read /proc/<pid>/stat for an unbounded number of processes, and
+        // the foreground group's own subtree must win the limited scan budget.
+        let child_count = FOREGROUND_TREE_SCAN_LIMIT + 200;
+        let shell_children: Vec<u32> = (10..10 + child_count as u32).collect();
+        // The leader's subtree: leader(2) -> agent(9000) -> agent-child(9001). Both
+        // descendants sit behind the shell's backlog and must still be reached.
+        let agent_pid = 9000u32;
+        let agent_child_pid = 9001u32;
+        let stat_reads = RefCell::new(Vec::new());
+
+        let members = foreground_process_group_members_with(
+            1,
+            2,
+            // Every pid has its own single task.
+            |pid, _budget| vec![pid],
+            |pid, _tid, _budget| match pid {
+                // The shell exposes the whole huge unrelated child list.
+                1 => shell_children.clone(),
+                // The leader exposes its agent child, which exposes its own child.
+                2 => vec![agent_pid],
+                _ if pid == agent_pid => vec![agent_child_pid],
+                _ => Vec::new(),
+            },
+            |process_group_id, pid| {
+                // Every visited pid triggers a /proc/<pid>/stat read; count them.
+                stat_reads.borrow_mut().push(pid);
+                (process_group_id == 2).then(|| ProcGroupMember {
+                    pid,
+                    comm: format!("p{pid}"),
+                    state: 'S',
+                })
+            },
+        )
+        .unwrap();
+
+        // Bounded: foreground detection inspects at most the scan limit processes,
+        // regardless of how large the descendant tree has grown.
+        assert!(
+            stat_reads.borrow().len() <= FOREGROUND_TREE_SCAN_LIMIT,
+            "foreground traversal read /proc/stat for {} processes, exceeding the {} bound",
+            stat_reads.borrow().len(),
+            FOREGROUND_TREE_SCAN_LIMIT
+        );
+        assert!(members.len() <= FOREGROUND_TREE_SCAN_LIMIT);
+        // The foreground-group leader and its descendants are visited before the
+        // shell's unrelated backlog, so the detected agent survives truncation.
+        assert!(
+            members.iter().any(|member| member.pid == 2),
+            "group leader must survive truncation"
+        );
+        assert!(
+            members.iter().any(|member| member.pid == agent_child_pid),
+            "leader descendants must be visited before unrelated shell descendants"
+        );
+    }
+
+    #[test]
+    fn foreground_tree_traversal_shares_the_scan_limit_between_roots() {
+        // A foreground-group leader with more descendants than the scan limit must not
+        // starve the pane shell's own foreground-group children, such as pipeline
+        // members that live under the shell rather than under the leader.
+        let leader_children: Vec<u32> =
+            (100..100 + FOREGROUND_TREE_SCAN_LIMIT as u32 + 200).collect();
+        let pipeline_pid = 9000u32;
+        let stat_reads = RefCell::new(Vec::new());
+
+        let members = foreground_process_group_members_with(
+            1,
+            2,
+            |pid, _budget| vec![pid],
+            |pid, _tid, _budget| match pid {
+                // The shell exposes a foreground-group pipeline child...
+                1 => vec![pipeline_pid],
+                // ...while the leader's own subtree already exceeds the bound.
+                2 => leader_children.clone(),
+                _ => Vec::new(),
+            },
+            |process_group_id, pid| {
+                stat_reads.borrow_mut().push(pid);
+                (process_group_id == 2).then(|| ProcGroupMember {
+                    pid,
+                    comm: format!("p{pid}"),
+                    state: 'S',
+                })
+            },
+        )
+        .unwrap();
+
+        assert!(stat_reads.borrow().len() <= FOREGROUND_TREE_SCAN_LIMIT);
+        assert!(
+            members.iter().any(|member| member.pid == pipeline_pid),
+            "shell-side foreground members must survive an oversized leader subtree"
+        );
+    }
+
+    #[test]
+    fn bounded_child_list_read_keeps_complete_tokens_at_eof() {
+        let mut budget = ForegroundScanBudget::for_probe();
+        let pids = read_bounded_pid_list(std::io::Cursor::new(b"10 20 30"), &mut budget);
+        assert_eq!(pids, vec![10, 20, 30]);
+        assert!(budget.child_bytes < FOREGROUND_CHILD_BYTE_LIMIT);
+    }
+
+    #[test]
+    fn bounded_child_list_read_drops_a_token_cut_off_by_the_byte_budget() {
+        let mut budget = ForegroundScanBudget::for_probe();
+        // The byte budget ends inside the trailing pid, which must not parse as 3.
+        budget.child_bytes = 8;
+        let pids = read_bounded_pid_list(std::io::Cursor::new(b" 10 20 300"), &mut budget);
+        assert_eq!(pids, vec![10, 20]);
+        assert_eq!(budget.child_bytes, 0);
+    }
+
+    #[test]
+    fn bounded_child_list_read_stops_at_the_pid_budget() {
+        let mut budget = ForegroundScanBudget::for_probe();
+        budget.child_pids = 2;
+        let pids = read_bounded_pid_list(std::io::Cursor::new(b"10 20 30 40"), &mut budget);
+        assert_eq!(pids, vec![10, 20]);
+        assert_eq!(budget.child_pids, 0);
+    }
+
+    #[test]
+    fn foreground_tree_traversal_reserves_enumeration_budget_per_root() {
+        // The leader expansion spending its whole budget must not stop the shell root
+        // from enumerating its own children.
+        let leader_consumed = RefCell::new(false);
+        let shell_saw_budget = RefCell::new(false);
+
+        let members = foreground_process_group_members_with(
+            1,
+            2,
+            |pid, budget| {
+                if pid == 2 {
+                    *leader_consumed.borrow_mut() = true;
+                } else if pid == 1 {
+                    *shell_saw_budget.borrow_mut() = budget.task_entries > 0;
+                }
+                budget.task_entries = 0;
+                budget.child_bytes = 0;
+                budget.child_pids = 0;
+                vec![pid]
+            },
+            |_pid, _tid, _budget| Vec::new(),
+            |_process_group_id, _pid| None,
+        );
+
+        assert!(*leader_consumed.borrow());
+        assert!(
+            *shell_saw_budget.borrow(),
+            "shell root must keep its own budget after the leader spends its own"
+        );
+        assert!(members.is_none());
+    }
+
+    #[test]
     fn foreground_members_degrade_to_the_direct_group_leader() {
         let members = foreground_process_group_members_with(
             100,
             200,
-            |_| Vec::new(),
-            |_, _| Vec::new(),
+            |_, _budget| Vec::new(),
+            |_, _, _budget| Vec::new(),
             |process_group_id, pid| {
                 (pid == process_group_id).then(|| ProcGroupMember {
                     pid,
@@ -1088,8 +1398,8 @@ mod tests {
             foreground_process_group_members_with(
                 100,
                 200,
-                |pid| vec![pid],
-                |pid, tid| {
+                |pid, _budget| vec![pid],
+                |pid, tid, _budget| {
                     children
                         .borrow()
                         .get(&(pid, tid))

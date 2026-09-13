@@ -756,6 +756,9 @@ pub(super) enum PendingEndpointKind {
         absolute_row: u32,
         generation: u64,
     },
+    PaneLinkResolve {
+        target: super::link_hover::LinkHoverTarget,
+    },
     PaneLinkActivate {
         pane_id: String,
         inner_rect: Rect,
@@ -991,6 +994,7 @@ pub(crate) struct ClientShellState {
     pub(super) overlay: Option<ClientShellOverlay>,
     pub(super) previous_pane_id: Option<String>,
     pub(super) pane_mouse_gesture: Option<ClientPaneMouseGesture>,
+    pub(super) link_hover: Option<super::link_hover::LinkHover>,
     pub(super) url_click_consumes_until_up: bool,
     pub(super) replaying_url_click: bool,
     pub(super) selection: Option<crate::selection::Selection<String>>,
@@ -1150,6 +1154,7 @@ impl ClientShellState {
             overlay,
             previous_pane_id: None,
             pane_mouse_gesture: None,
+            link_hover: None,
             url_click_consumes_until_up: false,
             replaying_url_click: false,
             selection: None,
@@ -1341,6 +1346,7 @@ impl ClientShellState {
             .then_some(ClientShellOverlay::Onboarding);
         self.previous_pane_id = None;
         self.pane_mouse_gesture = None;
+        self.link_hover = None;
         self.url_click_consumes_until_up = false;
         self.replaying_url_click = false;
         self.selection = None;
@@ -1868,6 +1874,7 @@ impl ClientShellState {
         self.graphics
             .set_scene(std::mem::take(&mut surface.graphics));
         self.pane_surface = Some(surface);
+        self.invalidate_link_hover();
         self.resume_mobile_switcher_if_ready();
         self.reconcile_input_source();
     }

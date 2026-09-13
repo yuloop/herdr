@@ -8,6 +8,11 @@ pub(crate) fn classify_child_exit(status: &portable_pty::ExitStatus) -> super::C
     }
 }
 
+pub(crate) fn shutdown_client_stream(stream: &crate::ipc::LocalStream) -> std::io::Result<()> {
+    let crate::ipc::LocalStream::UdSocket(stream) = stream;
+    stream.inner().shutdown(std::net::Shutdown::Both)
+}
+
 pub(crate) struct ClientStreamReader<'a>(pub(crate) &'a mut crate::ipc::LocalStream);
 
 impl std::io::Read for ClientStreamReader<'_> {
@@ -45,14 +50,14 @@ pub(crate) fn write_client_stream(
     use std::os::fd::AsRawFd as _;
     use std::time::Instant;
 
-    let crate::ipc::LocalStream::UdSocket(stream) = stream;
-    let mut socket = stream.inner();
+    let crate::ipc::LocalStream::UdSocket(socket) = stream;
+    let mut socket = socket.inner();
     let Some(timeout) = socket.write_timeout()? else {
         return socket.write_all(data);
     };
     let timed_out = || {
         // Dropping the writer clone alone would leave the reader blocked.
-        let _ = stream.inner().shutdown(std::net::Shutdown::Both);
+        let _ = shutdown_client_stream(stream);
         io::Error::new(
             io::ErrorKind::TimedOut,
             "terminal observer stopped receiving output",

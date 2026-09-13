@@ -572,6 +572,67 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
 }
 
 #[test]
+fn muted_agent_sidebar_rows_do_not_stack_terminal_faint() {
+    let mut projected = snapshot();
+    projected.tabs[0].label = "second".into();
+    projected.tabs[0].custom_label = true;
+    projected.agents = vec![ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: Some("reviewer".into()),
+        display_agent: None,
+        agent: Some("pi".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Working,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: true,
+    }];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 30).expect("agent sidebar frame");
+    let row = state.hits.agents.first().expect("agent row hit").0;
+    let buffer = frame.to_ratatui_buffer().expect("agent sidebar buffer");
+
+    for (label, needle) in [("tab", "second"), ("agent", "reviewer"), ("separator", "·")] {
+        let (x, y) = cell_symbol_position(&frame, row, needle);
+        let cell = buffer.cell((x, y)).expect("muted sidebar cell");
+        assert!(
+            !cell.modifier.contains(Modifier::DIM),
+            "{label} cell at ({x},{y}) should not stack terminal faint: {cell:?}"
+        );
+    }
+}
+
+#[test]
+fn workspace_state_text_does_not_stack_terminal_faint() {
+    use crate::config::SpaceSidebarToken;
+
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.rows = vec![
+        vec![SpaceSidebarToken::StateIcon, SpaceSidebarToken::Workspace],
+        vec![SpaceSidebarToken::StateText],
+    ];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 30).expect("workspace sidebar frame");
+    let rect = state.hits.workspaces.first().expect("workspace hit").rect;
+    let buffer = frame.to_ratatui_buffer().expect("workspace sidebar buffer");
+    let (x, y) = cell_symbol_position(&frame, rect, "idle");
+    let cell = buffer.cell((x, y)).expect("workspace state text cell");
+    assert!(
+        !cell.modifier.contains(Modifier::DIM),
+        "workspace state text at ({x},{y}) should not stack terminal faint: {cell:?}"
+    );
+}
+
+#[test]
 fn active_agent_view_controls_sidebar_order_and_focus_indices() {
     let mut projected = snapshot();
     let mut second_pane = projected.panes[0].clone();
@@ -1024,6 +1085,71 @@ fn unavailable_worktree_create_does_not_wedge_the_overlay() {
         .visible_endpoint_notice
         .as_ref()
         .is_some_and(|notice| notice.key.code == "worktree.create"));
+}
+
+#[test]
+fn worktree_action_errors_expire_without_more_input() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+
+    let mut guard = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::RemoveWorktree),
+        &mut guard,
+    );
+    let message = "This workspace is not a Herdr-managed worktree checkout.";
+    assert_eq!(state.endpoint_error.as_deref(), Some(message));
+
+    let deadline = state.endpoint_error_deadline.expect("deadline");
+    assert!(!state.tick_endpoint_error(deadline - std::time::Duration::from_secs(1)));
+    assert_eq!(state.endpoint_error.as_deref(), Some(message));
+
+    assert!(state.tick_endpoint_error(deadline + std::time::Duration::from_millis(1)));
+    assert!(state.endpoint_error.is_none());
+
+    // A repeated identical message must start a fresh lifetime instead of
+    // inheriting the earlier deadline.
+    let before_repeat = std::time::Instant::now();
+    state.set_endpoint_error(message);
+    assert!(
+        state.endpoint_error_deadline.expect("deadline")
+            >= before_repeat + std::time::Duration::from_secs(5)
+    );
+}
+
+#[test]
+fn worktree_prepare_rejection_notice_expires() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let mut prepare = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::NewWorktree),
+        &mut prepare,
+    );
+    let [ClientShellAction::Endpoint { request, .. }] = &prepare.actions[..] else {
+        panic!("new worktree should prepare through worktree.list");
+    };
+    let request_id = request.id.clone();
+    state.handle_endpoint_result(
+        "boot-1",
+        &request_id,
+        Err(ClientShellEndpointError {
+            code: Some("not_git_worktree".into()),
+            message: "Herdr worktree actions require a workspace inside a Git work tree".into(),
+        }),
+    );
+    let notice = state
+        .visible_endpoint_notice
+        .as_ref()
+        .expect("rejection notice");
+    assert!(notice.key.code.contains("not_git_worktree"));
+    let deadline = notice.deadline;
+
+    let (_, repaint) = state.tick_notifications(deadline + std::time::Duration::from_millis(1));
+    assert!(repaint);
+    assert!(state.visible_endpoint_notice.is_none());
 }
 
 #[test]

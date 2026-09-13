@@ -312,8 +312,8 @@ impl ClientShellState {
                                 .min(settings.integrations.len().saturating_sub(1));
                         }
                         Ok(_) => {
-                            self.endpoint_error = Some(
-                                "endpoint returned an unexpected integration list result".into(),
+                            self.set_endpoint_error(
+                                "endpoint returned an unexpected integration list result",
                             );
                         }
                         Err(_) => {}

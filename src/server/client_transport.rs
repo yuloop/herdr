@@ -1042,10 +1042,17 @@ fn client_read_loop_with_endpoint_controls(
             ClientMessage::ObserveTerminal { target } => {
                 #[cfg(unix)]
                 {
-                    stream.set_send_timeout(Some(OBSERVER_WRITE_TIMEOUT))?;
                     // macOS Unix sockets can block even with per-send MSG_DONTWAIT.
                     // ClientStreamReader preserves blocking reads on the shared socket.
-                    stream.set_nonblocking(true)?;
+                    let configured = stream
+                        .set_send_timeout(Some(OBSERVER_WRITE_TIMEOUT))
+                        .and_then(|()| stream.set_nonblocking(true));
+                    if let Err(err) = configured {
+                        let _ = crate::platform::shutdown_client_stream(&stream);
+                        let _ = server_event_tx
+                            .blocking_send(ServerEvent::ClientDisconnected { client_id });
+                        return Err(err);
+                    }
                 }
                 ServerEvent::ClientObserveTerminal { client_id, target }
             }

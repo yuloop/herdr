@@ -1774,18 +1774,29 @@ impl ClientShellState {
             if previous.inner_rect.width != next.inner_rect.width
                 || previous.inner_rect.height != next.inner_rect.height
                 || previous.alternate_screen_active != next.alternate_screen_active
-                // Manual mouse selections track a live buffer range, not a content revision.
-                 || (self.config.copy_on_select.is_enabled()
-                && previous.content_revision != next.content_revision
-                && (!previous.content_revision.is_multiple_of(2)
-                    || !next.content_revision.is_multiple_of(2)
-                    || !selection_cells_unchanged(
-                        selection,
-                        previous_surface,
-                        previous,
-                        &surface,
-                        next,
-                    )))
+            {
+                return true;
+            }
+            if previous.content_revision == next.content_revision {
+                return false;
+            }
+            match (&self.word_selection_gesture, &self.selection) {
+                // Word gestures cache boundaries outside the selected cells too.
+                (Some(_), _) => true,
+                (None, Some(selection)) => {
+                    self.config.copy_on_select.is_enabled()
+                        && (!previous.content_revision.is_multiple_of(2)
+                            || !next.content_revision.is_multiple_of(2)
+                            || !selection_cells_unchanged(
+                                selection,
+                                previous_surface,
+                                previous,
+                                &surface,
+                                next,
+                            ))
+                }
+                (None, None) => false,
+            }
         });
         if selection_content_changed {
             self.word_selection_gesture = None;

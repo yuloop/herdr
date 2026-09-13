@@ -621,55 +621,7 @@ impl ClientShellState {
                 absolute_row,
                 generation,
             } => {
-                if self.pending_word_selection != Some(generation)
-                    || self.snapshot.as_deref().is_none_or(|snapshot| {
-                        !snapshot.panes.iter().any(|pane| pane.pane_id == pane_id)
-                    })
-                {
-                    return (false, Vec::new());
-                }
-                self.pending_word_selection = None;
-                let row_text = match result {
-                    Ok(crate::api::schema::ResponseResult::PaneSelection {
-                        pane_id: returned_pane_id,
-                        text,
-                    }) if returned_pane_id == pane_id => text,
-                    Ok(crate::api::schema::ResponseResult::PaneSelection { .. }) => {
-                        return (false, Vec::new())
-                    }
-                    Ok(_) => {
-                        self.endpoint_error = Some(
-                            "endpoint returned an unexpected word-selection result".to_owned(),
-                        );
-                        return (true, Vec::new());
-                    }
-                    Err(_) => return (true, Vec::new()),
-                };
-                let Some((start_col, end_col)) =
-                    crate::app::actions::word_bounds_at_column(&row_text, col)
-                else {
-                    self.selection = None;
-                    return (true, Vec::new());
-                };
-                let mut selection = crate::selection::Selection::absolute_range(
-                    pane_id,
-                    (absolute_row, start_col),
-                    (absolute_row, end_col),
-                );
-                if !selection.finish() {
-                    return (false, Vec::new());
-                }
-                self.selection = Some(selection);
-                self.selection_autoscroll = None;
-                self.selection_autoscroll_deadline = None;
-                if self.config.copy_on_select != crate::config::CopyOnSelectModeConfig::Clipboard {
-                    return (true, Vec::new());
-                }
-                self.selection_highlight_clear_deadline =
-                    Some(std::time::Instant::now() + std::time::Duration::from_millis(500));
-                let mut outcome = ClientShellInput::default();
-                self.request_selection_copy(&mut outcome, false);
-                return (true, outcome.actions);
+                return self.complete_word_selection_row(pane_id, absolute_row, generation, result);
             }
             PendingEndpointKind::PaneLinkActivate {
                 pane_id,

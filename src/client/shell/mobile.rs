@@ -622,8 +622,11 @@ fn mobile_items(
             });
         }
     }
-    let agents =
-        super::aggregate_navigation::aggregate_agent_rows(endpoints, config.agent_panel_sort);
+    let agents = super::aggregate_navigation::aggregate_agent_rows(
+        endpoints,
+        active_endpoint_id,
+        config.agent_panel_sort,
+    );
     if !agents.is_empty() || snapshot.agent_view_label.is_some() {
         let title = snapshot
             .agent_view_label

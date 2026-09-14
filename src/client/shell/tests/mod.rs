@@ -248,6 +248,7 @@ mod chrome_context;
 mod copy;
 mod endpoint_requests;
 mod endpoints;
+mod graphics;
 #[path = "input.rs"]
 mod input_domain;
 mod keybindings_settings;

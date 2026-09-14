@@ -147,9 +147,11 @@ impl ClientShellState {
             return Some(self.compose_unavailable(cols, rows));
         }
         let snapshot = self.snapshot.as_deref()?;
-        // A one-step successor is retained separately until its exact snapshot arrives; do not
-        // keep composing the now-superseded current pair while it is pending.
-        if self.pending_pane_surface.is_some() {
+        // Do not compose a retained surface while waiting for its matching snapshot or
+        // connection generation.
+        if self.pending_pane_surface.is_some()
+            || self.pane_surface_generation != self.active_snapshot_generation
+        {
             return None;
         }
         let surface = self.pane_surface.as_ref()?;
@@ -394,12 +396,14 @@ impl ClientShellState {
                         .saturating_sub(copy_mode.offset_from_bottom)
                         .min(u32::MAX as usize) as u32;
                     let viewport_row = copy_mode.cursor.row.saturating_sub(viewport_top);
+                    let x = hit.inner_rect.x.saturating_add(copy_mode.cursor.col);
+                    let y = hit.inner_rect.y.saturating_add(viewport_row as u16);
                     if viewport_row < u32::from(hit.inner_rect.height)
                         && copy_mode.cursor.col < hit.inner_rect.width
+                        && x < frame.width
+                        && y < frame.height
                     {
                         let mut composed = frame.to_ratatui_buffer()?;
-                        let x = hit.inner_rect.x + copy_mode.cursor.col;
-                        let y = hit.inner_rect.y + viewport_row as u16;
                         occlusion.cover(Rect::new(x, y, 1, 1));
                         composed[(x, y)].set_style(
                             Style::default()

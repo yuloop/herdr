@@ -146,7 +146,7 @@ impl ClientShellState {
                 selection.finish();
             }
             self.word_selection_gesture = None;
-            if self.config.copy_on_select.is_enabled() {
+            if self.config.copy_on_select == crate::config::CopyOnSelectModeConfig::Clipboard {
                 self.request_selection_copy(outcome, false);
                 if dragged {
                     self.selection = None;

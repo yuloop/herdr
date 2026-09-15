@@ -565,6 +565,75 @@ fn saved_machine_preserves_endpoint_scoped_worktree_collapses() {
 }
 
 #[test]
+fn expanded_machine_sidebar_reveals_newly_focused_workspace() {
+    let (mut state, remote_id) = state_with_remote();
+    let mut initial = snapshot();
+    let template = initial.workspaces[0].clone();
+    initial.workspaces = (1..=12)
+        .map(|number| ClientShellWorkspace {
+            workspace_id: format!("ws_{number}"),
+            number,
+            label: format!("space-{number}"),
+            focused: number == 1,
+            ..template.clone()
+        })
+        .collect();
+    // Reuse workspace IDs across machines so revealing must be endpoint-scoped.
+    let mut remote = initial.clone();
+    remote.boot_id = "remote-boot".into();
+    remote.workspaces.push(ClientShellWorkspace {
+        workspace_id: "ws_13".into(),
+        number: 13,
+        focused: false,
+        ..template.clone()
+    });
+    state.set_endpoint_snapshot(&remote_id, Box::new(remote));
+    state.set_snapshot(Box::new(initial));
+    state.compose(106, 20).expect("full machines sidebar");
+    assert!(state.hits.workspace_max_scroll > 0);
+
+    let mut update = state.snapshot.as_deref().expect("snapshot").clone();
+    update.revision = 2;
+    update.workspaces.push(ClientShellWorkspace {
+        workspace_id: "ws_13".into(),
+        number: 13,
+        label: "new-space".into(),
+        ..template
+    });
+    update.focused_workspace_id = Some("ws_13".into());
+    for workspace in &mut update.workspaces {
+        workspace.focused = workspace.workspace_id == "ws_13";
+    }
+    state.set_snapshot(Box::new(update));
+    let mut updated_surface = surface();
+    updated_surface.projection_revision = 2;
+    state.set_pane_surface(updated_surface);
+    state.compose(106, 2).expect("zero-height workspace body");
+    assert!(state.reveal_focused_workspace);
+    state.compose(106, 20).expect("new workspace revealed");
+    assert!(state
+        .hits
+        .workspaces
+        .iter()
+        .any(|hit| { hit.endpoint_id == ClientEndpointId::Local && hit.workspace_id == "ws_13" }));
+
+    state.workspace_scroll = 0;
+    state.compose(106, 20).expect("manual scroll");
+    assert_eq!(state.workspace_scroll, 0);
+    assert!(!state
+        .hits
+        .workspaces
+        .iter()
+        .any(|hit| { hit.endpoint_id == ClientEndpointId::Local && hit.workspace_id == "ws_13" }));
+    let unchanged = state.snapshot.as_deref().expect("snapshot").clone();
+    state.set_snapshot(Box::new(unchanged));
+    state
+        .compose(106, 20)
+        .expect("unchanged focus preserves scroll");
+    assert_eq!(state.workspace_scroll, 0);
+}
+
+#[test]
 fn expanded_machine_sidebar_applies_space_row_gap_within_each_machine() {
     let (mut state, remote_id) = state_with_remote();
     state.config.spaces.row_gap = 1;

@@ -328,7 +328,9 @@ pub(super) fn render_expanded(
             _ => 0,
         })
         .collect::<Vec<_>>();
-    if std::mem::take(state.reveal_navigation_workspace) {
+    let reveal_navigation = !body.is_empty() && std::mem::take(state.reveal_navigation_workspace);
+    let reveal_focus = !body.is_empty() && std::mem::take(state.reveal_focused_workspace);
+    if reveal_navigation || reveal_focus {
         let selected_row = rows.iter().position(|row| match row {
             Row::Workspace { endpoint, entry } => {
                 let endpoint = &state.endpoints[*endpoint];
@@ -337,9 +339,17 @@ pub(super) fn render_expanded(
                     .as_deref()
                     .and_then(|snapshot| snapshot.workspaces.get(entry.index))
                     .is_some_and(|workspace| {
-                        state.selected_workspace_id.is_some_and(|target| {
-                            target.matches(&endpoint.endpoint_id, &workspace.workspace_id)
-                        })
+                        if reveal_navigation {
+                            state.selected_workspace_id.is_some_and(|target| {
+                                target.matches(&endpoint.endpoint_id, &workspace.workspace_id)
+                            })
+                        } else {
+                            &endpoint.endpoint_id == state.active_endpoint_id
+                                && active_snapshot.is_some_and(|snapshot| {
+                                    snapshot.focused_workspace_id.as_deref()
+                                        == Some(workspace.workspace_id.as_str())
+                                })
+                        }
                     })
             }
             Row::Endpoint(_) => false,

@@ -195,8 +195,7 @@ impl ClientShellState {
             .is_some_and(|worktree| worktree.is_linked_worktree);
         let kind = match action {
             KeybindAction::NewWorktree | KeybindAction::OpenWorktree if linked => {
-                self.endpoint_error =
-                    Some(rust_i18n::t!("dialog.worktree_parent_only").to_string());
+                self.set_endpoint_error(rust_i18n::t!("dialog.worktree_parent_only").to_string());
                 outcome.repaint = true;
                 return;
             }
@@ -207,8 +206,7 @@ impl ClientShellState {
                 workspace_id: workspace_id.clone(),
             },
             KeybindAction::RemoveWorktree if !linked => {
-                self.endpoint_error =
-                    Some(rust_i18n::t!("dialog.worktree_not_managed").to_string());
+                self.set_endpoint_error(rust_i18n::t!("dialog.worktree_not_managed").to_string());
                 outcome.repaint = true;
                 return;
             }
@@ -420,7 +418,7 @@ impl ClientShellState {
                     })
                     .collect::<Vec<_>>();
                 if entries.is_empty() {
-                    self.endpoint_error = Some(rust_i18n::t!("dialog.no_worktrees").to_string());
+                    self.set_endpoint_error(rust_i18n::t!("dialog.no_worktrees").to_string());
                 } else {
                     self.overlay = Some(ClientShellOverlay::WorktreeOpen(
                         ClientWorktreeOpenOverlay {
@@ -455,8 +453,7 @@ impl ClientShellState {
                         },
                     ));
                 } else {
-                    self.endpoint_error =
-                        Some(rust_i18n::t!("dialog.worktree_not_managed").to_string());
+                    self.set_endpoint_error(rust_i18n::t!("dialog.worktree_not_managed").to_string());
                 }
                 true
             }

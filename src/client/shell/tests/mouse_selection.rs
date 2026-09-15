@@ -39,7 +39,9 @@ fn selection_repaint_cadence_does_not_leave_work_after_another_composition() {
 
 #[test]
 fn selection_release_copies_latest_position_before_deferred_paint() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut config = Config::default();
+    config.ui.copy_on_select = crate::config::CopyOnSelectModeConfig::Clipboard;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     state.compose(106, 20).expect("pane frame");
@@ -326,11 +328,10 @@ fn client_double_click_selects_and_copies_endpoint_row_word() {
         })
     };
 
-        state.handle_raw_events(vec![click()]);
-        state.handle_raw_events(vec![release()]);
-        assert!(state.selection.is_none(), "plain clicks must not select");
-        let second = state.handle_raw_events(vec![click()]);
-        let ClientShellAction::Endpoint { request, .. } = second
+    state.handle_raw_events(vec![click()]);
+    state.handle_raw_events(vec![release()]);
+    let second = state.handle_raw_events(vec![click()]);
+    let ClientShellAction::Endpoint { request, .. } = second
         .actions
         .iter()
         .find(|action| {
@@ -344,14 +345,59 @@ fn client_double_click_selects_and_copies_endpoint_row_word() {
     else {
         unreachable!()
     };
-        let word_request_id = request.id.clone();
-        assert!(matches!(
-            &request.method,
-            crate::api::schema::Method::PaneSelectionRead(params)
-                if params.anchor == crate::api::schema::PaneTextPoint { row: 0, col: 0 }
-                    && params.cursor == crate::api::schema::PaneTextPoint { row: 0, col: 3 }
-        ));
+    let word_request_id = request.id.clone();
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneSelectionRead(params)
+            if params.anchor == crate::api::schema::PaneTextPoint { row: 0, col: 0 }
+                && params.cursor == crate::api::schema::PaneTextPoint { row: 0, col: 3 }
+    ));
 
+    let released = state.handle_raw_events(vec![release()]);
+    assert!(released.actions.is_empty());
+
+    let (repaint, actions) = state.handle_endpoint_result(
+        "boot-1",
+        &word_request_id,
+        Ok(crate::api::schema::ResponseResult::PaneSelection {
+            pane_id: "pane_1".into(),
+            text: "LIVE".into(),
+        }),
+    );
+    assert!(repaint);
+    assert!(state
+        .selection
+        .as_ref()
+        .is_some_and(crate::selection::Selection::is_finalized));
+    let [ClientShellAction::Endpoint { request, .. }] = &actions[..] else {
+        panic!("auto-copy should read the selected word");
+    };
+    let copy_request_id = request.id.clone();
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneSelectionRead(params)
+            if params.anchor.col == 0 && params.cursor.col == 3
+    ));
+    let (_, actions) = state.handle_endpoint_result(
+        "boot-1",
+        &copy_request_id,
+        Ok(crate::api::schema::ResponseResult::PaneSelection {
+            pane_id: "pane_1".into(),
+            text: "LIVE".into(),
+        }),
+    );
+    assert!(matches!(
+        &actions[..],
+        [ClientShellAction::ClipboardWrite(bytes)] if bytes == b"LIVE"
+    ));
+}
+
+#[test]
+fn client_double_click_selects_word_and_copies_only_after_release() {
+    for (copy_on_select, release_before_response) in [(false, true), (true, false)] {
+        let mut state = word_drag_state(copy_on_select);
+        let initial = start_word_drag(&mut state);
+        let release = MouseEventKind::Up(MouseButton::Left);
         if release_before_response {
             assert!(word_drag_mouse(&mut state, release, 0, 8)
                 .actions
@@ -402,7 +448,11 @@ fn client_double_click_selects_and_copies_endpoint_row_word() {
 
 fn word_drag_state(copy_on_select: bool) -> ClientShellState {
     let mut config = Config::default();
-    config.ui.copy_on_select = copy_on_select;
+    config.ui.copy_on_select = if copy_on_select {
+        crate::config::CopyOnSelectModeConfig::Clipboard
+    } else {
+        crate::config::CopyOnSelectModeConfig::Manual
+    };
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     state.set_snapshot(Box::new(snapshot()));
     let mut pane_surface = surface();

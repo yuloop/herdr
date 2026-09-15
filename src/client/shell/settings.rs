@@ -169,7 +169,7 @@ impl ClientShellState {
             edit.description(),
             |content| edit.apply(content),
         ) {
-            self.endpoint_error = Some(error);
+            self.set_endpoint_error(error);
             outcome.repaint = true;
             return false;
         }

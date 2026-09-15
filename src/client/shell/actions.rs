@@ -192,8 +192,9 @@ impl ClientShellState {
                         .then(|| candidate.command_id.clone())
                 });
                 let Some(command_id) = command_id else {
-                    self.endpoint_error =
-                        Some(rust_i18n::t!("endpoint.custom_unavailable").to_string());
+                    self.set_endpoint_error(
+                        rust_i18n::t!("endpoint.custom_unavailable").to_string(),
+                    );
                     outcome.repaint = true;
                     return;
                 };

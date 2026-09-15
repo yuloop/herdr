@@ -128,17 +128,47 @@ pub(super) fn render_mode_bar(
                         crate::api::schema::PaneCopySearchDirection::Forward => "/",
                         crate::api::schema::PaneCopySearchDirection::Backward => "?",
                     };
-                    segments.extend([
-                        (rust_i18n::t!("menu.copy_label").to_string(), mode_style),
-                        (" ".to_owned(), base),
-                        (marker.to_owned(), key),
-                        (
-                            prompt.query.clone(),
-                            Style::default().fg(palette.text).bg(palette.panel_bg),
-                        ),
-                        ("█".to_owned(), key),
-                        (rust_i18n::t!("menu.enter_search_cancel").to_string(), base),
-                    ]);
+                    let label = rust_i18n::t!("menu.copy_label").to_string();
+                    let footer = rust_i18n::t!("menu.enter_search_cancel").to_string();
+                    let label_width =
+                        u16::try_from(UnicodeWidthStr::width(label.as_str())).unwrap_or(u16::MAX);
+                    buffer.set_stringn(bar.x, bar.y, &label, usize::from(bar.width), mode_style);
+                    let prefix = label_width.saturating_add(2);
+                    if bar.width >= label_width.saturating_add(1) {
+                        buffer.set_string(bar.x + label_width, bar.y, " ", base);
+                    }
+                    if bar.width >= prefix {
+                        buffer.set_string(bar.x + prefix - 1, bar.y, marker, key);
+                    }
+                    let footer_width = if bar.width >= 50 {
+                        u16::try_from(UnicodeWidthStr::width(footer.as_str())).unwrap_or(u16::MAX)
+                    } else {
+                        0
+                    };
+                    let field = Rect::new(
+                        bar.x.saturating_add(prefix),
+                        bar.y,
+                        bar.width.saturating_sub(prefix.saturating_add(footer_width)),
+                        1,
+                    );
+                    if let Some(cursor) = text_editor::render(
+                        buffer,
+                        field,
+                        &prompt.query,
+                        Style::default().fg(palette.text).bg(palette.panel_bg),
+                    ) {
+                        buffer[(cursor.x, cursor.y)]
+                            .set_style(Style::default().fg(palette.panel_bg).bg(palette.text));
+                    }
+                    if footer_width > 0 && footer_width <= bar.width {
+                        buffer.set_string(
+                            bar.right().saturating_sub(footer_width),
+                            bar.y,
+                            &footer,
+                            base,
+                        );
+                    }
+                    return Some(bar);
                 } else {
                     let select = if copy_mode.selection.is_some() {
                         rust_i18n::t!("menu.selecting").to_string()

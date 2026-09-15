@@ -301,8 +301,7 @@ impl ClientShellState {
                 if let Some(label) = label {
                     self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
                         title: rust_i18n::t!("dialog.rename_workspace").to_string(),
-                        input: label,
-                        replace_on_type: false,
+                        input: TextEditor::new(&label, false),
                         target: ClientRenameTarget::Workspace { workspace_id },
                     }));
                 }
@@ -383,8 +382,7 @@ impl ClientShellState {
                     .to_string();
                     self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
                         title: rust_i18n::t!("dialog.new_tab").to_string(),
-                        input: default_name.clone(),
-                        replace_on_type: true,
+                        input: TextEditor::new(&default_name, true),
                         target: ClientRenameTarget::NewTab {
                             workspace_id,
                             default_name,
@@ -411,8 +409,7 @@ impl ClientShellState {
                 if let Some(tab) = tab {
                     self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
                         title: rust_i18n::t!("dialog.rename_tab").to_string(),
-                        input: tab.label.clone(),
-                        replace_on_type: false,
+                        input: TextEditor::new(&tab.label, false),
                         target: ClientRenameTarget::Tab {
                             tab_id,
                             auto_name: !tab.custom_label,
@@ -454,8 +451,7 @@ impl ClientShellState {
                 });
                 self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
                     title: rust_i18n::t!("dialog.rename_pane").to_string(),
-                    input: label.clone().unwrap_or_default(),
-                    replace_on_type: label.is_none(),
+                    input: TextEditor::new(label.as_deref().unwrap_or_default(), label.is_none()),
                     target: ClientRenameTarget::Pane { pane_id },
                 }));
             }

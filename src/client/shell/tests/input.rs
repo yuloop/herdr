@@ -151,8 +151,7 @@ fn modal_paste_inserts_clipboard_text_through_overlay_text_path() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
         title: "rename pane".to_owned(),
-        input: "replace me".into(),
-        replace_on_type: true,
+        input: TextEditor::new("replace me", true),
         target: ClientRenameTarget::Pane {
             pane_id: "pane_1".into(),
         },

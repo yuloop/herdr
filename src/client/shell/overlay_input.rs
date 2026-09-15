@@ -344,8 +344,7 @@ impl ClientShellState {
             .unwrap_or_else(|| "workspace".to_owned());
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
             title: rust_i18n::t!("dialog.new_workspace").to_string(),
-            input: suggested_name.clone(),
-            replace_on_type: true,
+            input: TextEditor::new(&suggested_name, true),
             target: ClientRenameTarget::NewWorkspace {
                 source_workspace_id,
                 cwd,
@@ -370,8 +369,7 @@ impl ClientShellState {
         };
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
             title: rust_i18n::t!("dialog.rename_workspace").to_string(),
-            input: workspace.label.clone(),
-            replace_on_type: false,
+            input: TextEditor::new(&workspace.label, false),
             target: ClientRenameTarget::Workspace { workspace_id },
         }));
     }
@@ -392,8 +390,7 @@ impl ClientShellState {
         .to_string();
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
             title: rust_i18n::t!("dialog.new_tab").to_string(),
-            input: default_name.clone(),
-            replace_on_type: true,
+            input: TextEditor::new(&default_name, true),
             target: ClientRenameTarget::NewTab {
                 workspace_id,
                 default_name,
@@ -413,8 +410,7 @@ impl ClientShellState {
         };
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
             title: rust_i18n::t!("dialog.rename_tab").to_string(),
-            input: tab.label.clone(),
-            replace_on_type: false,
+            input: TextEditor::new(&tab.label, false),
             target: ClientRenameTarget::Tab {
                 tab_id: tab.tab_id.clone(),
                 auto_name: !tab.custom_label,
@@ -435,8 +431,10 @@ impl ClientShellState {
         };
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
             title: rust_i18n::t!("dialog.rename_pane").to_string(),
-            input: pane.label.clone().unwrap_or_default(),
-            replace_on_type: pane.label.is_none(),
+            input: TextEditor::new(
+                pane.label.as_deref().unwrap_or_default(),
+                pane.label.is_none(),
+            ),
             target: ClientRenameTarget::Pane {
                 pane_id: pane.pane_id.clone(),
             },

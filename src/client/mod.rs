@@ -539,6 +539,10 @@ async fn run_client_loop(
             handshake.endpoint_methods.unwrap_or_default(),
             handshake.endpoint_capabilities.unwrap_or_default(),
         );
+        let surface_reuse = negotiation.supports_capability(protocol::surface_reuse::CAPABILITY);
+        let surface_delta = negotiation.supports_capability(protocol::surface_delta::CAPABILITY);
+        let surface_decoder = (surface_reuse || surface_delta)
+            .then(|| protocol::surface_reuse::Decoder::new(surface_delta));
         let transport = start_endpoint_transport(
             stream,
             (),
@@ -546,7 +550,7 @@ async fn run_client_loop(
             endpoint::ClientEndpointId::Local,
             1,
             max_frame_size,
-            negotiation.supports_capability(protocol::surface_reuse::CAPABILITY),
+            surface_decoder,
         )?;
         let mut registry = endpoint::EndpointRegistry::new(transport, 1, negotiation);
         if state.shell.is_some() {
@@ -1198,6 +1202,8 @@ async fn run_client_loop(
                     }
                     let surface_reuse =
                         negotiation.supports_capability(protocol::surface_reuse::CAPABILITY);
+                    let surface_delta =
+                        negotiation.supports_capability(protocol::surface_delta::CAPABILITY);
                     let agent_view_projection_supported = negotiation.supports_capability(
                         crate::protocol::endpoint::AGENT_VIEW_PROJECTION_CAPABILITY,
                     );
@@ -1220,6 +1226,8 @@ async fn run_client_loop(
                     if let Some(frame) = frame {
                         state.present_frame(frame);
                     }
+                    let surface_decoder = (surface_reuse || surface_delta)
+                        .then(|| protocol::surface_reuse::Decoder::new(surface_delta));
                     let reader_tx = event_tx.clone();
                     std::thread::spawn(move || {
                         server_reader_thread(
@@ -1229,7 +1237,7 @@ async fn run_client_loop(
                             MAX_GRAPHICS_FRAME_SIZE,
                             endpoint_id,
                             generation,
-                            surface_reuse,
+                            surface_decoder,
                         );
                     });
                 }

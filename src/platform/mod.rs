@@ -153,9 +153,17 @@ pub fn launch_server_daemon_command(command: &mut std::process::Command) -> std:
     command.spawn().map(|child| child.id())
 }
 
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn prepare_server_process(_handoff_import: bool) -> std::io::Result<bool> {
+    Ok(false)
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn detach_server_daemon_command(command: &mut std::process::Command) {
     use std::os::unix::process::CommandExt;
+
+    #[cfg(target_os = "macos")]
+    macos::configure_server_daemon_context(command);
 
     unsafe {
         command.pre_exec(|| {

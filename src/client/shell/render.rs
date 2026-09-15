@@ -134,6 +134,9 @@ pub(super) fn render_mode_bar(
                         u16::try_from(UnicodeWidthStr::width(label.as_str())).unwrap_or(u16::MAX);
                     buffer.set_stringn(bar.x, bar.y, &label, usize::from(bar.width), mode_style);
                     let prefix = label_width.saturating_add(2);
+                    if bar.width >= label_width.saturating_add(1) {
+                        buffer.set_string(bar.x + label_width, bar.y, " ", base);
+                    }
                     if bar.width >= prefix {
                         buffer.set_string(bar.x + prefix - 1, bar.y, marker, key);
                     }
@@ -157,8 +160,13 @@ pub(super) fn render_mode_bar(
                         buffer[(cursor.x, cursor.y)]
                             .set_style(Style::default().fg(palette.panel_bg).bg(palette.text));
                     }
-                    if footer_width > 0 {
-                        buffer.set_string(bar.right() - footer_width, bar.y, &footer, base);
+                    if footer_width > 0 && footer_width <= bar.width {
+                        buffer.set_string(
+                            bar.right().saturating_sub(footer_width),
+                            bar.y,
+                            &footer,
+                            base,
+                        );
                     }
                     return Some(bar);
                 } else {

@@ -5,6 +5,63 @@ pub(super) const NEW_TAB_WIDTH: u16 = 3;
 pub(super) const WORKSPACE_HEADER_ROWS: u16 = 2;
 const ENDPOINT_ERROR_TIMEOUT_SECS: u64 = 5;
 
+fn pane_surface_row<'a>(
+    surface: &'a PaneSurfaceFrame,
+    pane: &crate::protocol::PaneSurfacePane,
+    absolute_row: u32,
+) -> Option<&'a [crate::protocol::CellData]> {
+    let viewport_top = pane
+        .scroll
+        .map(|scroll| {
+            scroll
+                .max_offset_from_bottom
+                .saturating_sub(scroll.offset_from_bottom) as u32
+        })
+        .unwrap_or(0);
+    let viewport_row = u16::try_from(absolute_row.checked_sub(viewport_top)?).ok()?;
+    if viewport_row >= pane.inner_rect.height {
+        return None;
+    }
+    let start = (usize::from(pane.inner_rect.y) + usize::from(viewport_row))
+        * usize::from(surface.frame.width)
+        + usize::from(pane.inner_rect.x);
+    surface
+        .frame
+        .cells
+        .get(start..start + usize::from(pane.inner_rect.width))
+}
+
+fn selection_cells_unchanged(
+    selection: &crate::selection::Selection<String>,
+    previous_surface: &PaneSurfaceFrame,
+    previous_pane: &crate::protocol::PaneSurfacePane,
+    next_surface: &PaneSurfaceFrame,
+    next_pane: &crate::protocol::PaneSurfacePane,
+) -> bool {
+    let ((start_row, start_col), (end_row, end_col)) = selection.ordered_cells();
+    (start_row..=end_row).all(|row| {
+        let first_col = if row == start_row { start_col } else { 0 };
+        let last_col = if row == end_row {
+            end_col
+        } else {
+            previous_pane.inner_rect.width.saturating_sub(1)
+        };
+        pane_surface_row(previous_surface, previous_pane, row)
+            .zip(pane_surface_row(next_surface, next_pane, row))
+            .and_then(|(previous, next)| {
+                previous
+                    .get(usize::from(first_col)..=usize::from(last_col))
+                    .zip(next.get(usize::from(first_col)..=usize::from(last_col)))
+            })
+            .is_some_and(|(previous, next)| {
+                previous
+                    .iter()
+                    .zip(next)
+                    .all(|(previous, next)| previous.symbol == next.symbol)
+            })
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClientShellKeybindingSource {
     Local,
@@ -1742,7 +1799,7 @@ impl ClientShellState {
             let (Some(previous), Some(next)) = (previous, next) else {
                 return false;
             };
-            previous.inner_rect.width != next.inner_rect.width
+            if previous.inner_rect.width != next.inner_rect.width
                 || previous.inner_rect.height != next.inner_rect.height
                 || previous.alternate_screen_active != next.alternate_screen_active
             {

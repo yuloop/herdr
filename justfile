@@ -15,6 +15,11 @@ test:
 maintenance-test:
     python3 -m unittest scripts.test_agent_detection_manifest_check scripts.test_changelog scripts.test_config_reference_check scripts.test_cross_platform_gate scripts.test_docs_translation_parity scripts.test_i18n_key_check scripts.test_herdr_automation_issue scripts.test_herdr_deploy scripts.test_herdr_deploy_integration scripts.test_sync_upstream scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_unix_installer scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty
 
+# Local interactive Windows Terminal input qualification (never runs in normal CI).
+[windows]
+test-windows-input *args:
+    pwsh -NoProfile -File scripts/test_windows_input.ps1 -AllowInputInjection {{args}}
+
 # Run one nextest filter, e.g. `just test-one codex_stale_working`
 test-one filter:
     cargo nextest run --locked "{{filter}}" --status-level fail --final-status-level fail --failure-output final --success-output never

@@ -97,16 +97,6 @@ pub(super) fn console_input_handle() -> std::io::Result<windows_sys::Win32::Foun
 }
 
 #[cfg(windows)]
-pub(super) fn virtual_terminal_input_enabled(
-    handle: windows_sys::Win32::Foundation::HANDLE,
-) -> bool {
-    use windows_sys::Win32::System::Console::{GetConsoleMode, ENABLE_VIRTUAL_TERMINAL_INPUT};
-
-    let mut mode = 0;
-    (unsafe { GetConsoleMode(handle, &mut mode) } != 0) && mode & ENABLE_VIRTUAL_TERMINAL_INPUT != 0
-}
-
-#[cfg(windows)]
 enum WindowsInputItems {
     Items(Vec<PlatformInputItem>),
     Idle,

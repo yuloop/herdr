@@ -330,7 +330,7 @@ fn windows_stdin_reader_loop(
         windows_crossterm_reader_loop(event_tx, should_quit);
     } else {
         match windows_vti::console_input_handle() {
-            Ok(handle) if windows_vti::virtual_terminal_input_enabled(handle) => {
+            Ok(handle) if crate::platform::windows_virtual_terminal_input_active() => {
                 windows_vti::raw_console_reader_loop(handle, event_tx, should_quit);
             }
             _ => windows_crossterm_reader_loop(event_tx, should_quit),

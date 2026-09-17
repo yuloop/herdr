@@ -3,6 +3,8 @@
 use std::io::{self, Write as _};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+#[cfg(windows)]
+use std::sync::{Mutex, MutexGuard};
 
 use crossterm::event::{
     DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
@@ -48,25 +50,23 @@ pub(super) fn setup_terminal_with_capabilities(
         restore_claimed: Arc::new(AtomicBool::new(false)),
         restored: false,
         #[cfg(windows)]
-        restore_windows_input_mode: None,
+        restore_windows_input_mode: Arc::new(WindowsInputModeRestore::default()),
     };
     crate::terminal_modes::clear_host_mouse_reporting(&mut io::stdout())?;
     let host_color_scheme_reports =
         should_enable_host_color_scheme_reports(enable_client_protocols);
-
     #[cfg(windows)]
     let windows_ssh_session = is_ssh_session();
     #[cfg(windows)]
     let mut windows_virtual_terminal_input =
         if windows_vti_input_backend_enabled() && windows_ssh_session {
-            enable_windows_virtual_terminal_input()
+            enable_windows_virtual_terminal_input(
+                &terminal_guard.restore_claimed,
+                &terminal_guard.restore_windows_input_mode,
+            )
         } else {
             WindowsVirtualTerminalInputSetup::default()
         };
-    #[cfg(windows)]
-    {
-        terminal_guard.restore_windows_input_mode = windows_virtual_terminal_input.restore_mode;
-    }
 
     if enable_client_protocols {
         set_mouse_capture(mouse_capture, false)?;
@@ -87,8 +87,10 @@ pub(super) fn setup_terminal_with_capabilities(
 
     #[cfg(windows)]
     if enable_client_protocols && windows_vti_input_backend_enabled() && !windows_ssh_session {
-        windows_virtual_terminal_input = enable_windows_virtual_terminal_input();
-        terminal_guard.restore_windows_input_mode = windows_virtual_terminal_input.restore_mode;
+        windows_virtual_terminal_input = enable_windows_virtual_terminal_input(
+            &terminal_guard.restore_claimed,
+            &terminal_guard.restore_windows_input_mode,
+        );
     }
 
     #[cfg(windows)]
@@ -126,7 +128,7 @@ pub(super) struct TerminalGuard {
     restore_claimed: Arc<AtomicBool>,
     restored: bool,
     #[cfg(windows)]
-    restore_windows_input_mode: Option<u32>,
+    restore_windows_input_mode: Arc<WindowsInputModeRestore>,
 }
 
 pub(super) fn write_host_color_scheme_report_mode(
@@ -171,10 +173,59 @@ pub(super) fn should_draw_host_cursor(mode: crate::config::HostCursorModeConfig)
 pub(super) struct WindowsVirtualTerminalInputSetup {
     active: bool,
     restore_mode: Option<u32>,
+    warning: Option<&'static str>,
 }
 
 #[cfg(windows)]
-pub(super) fn enable_windows_virtual_terminal_input() -> WindowsVirtualTerminalInputSetup {
+#[derive(Default)]
+struct WindowsInputModeRestore {
+    mode: Mutex<Option<u32>>,
+}
+
+#[cfg(windows)]
+impl WindowsInputModeRestore {
+    fn lock(&self) -> MutexGuard<'_, Option<u32>> {
+        match self.mode.lock() {
+            Ok(mode) => mode,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn activate(
+        &self,
+        restore_claimed: &AtomicBool,
+        operation: impl FnOnce() -> WindowsVirtualTerminalInputSetup,
+    ) -> WindowsVirtualTerminalInputSetup {
+        let mut restore_mode = self.lock();
+        if restore_claimed.load(Ordering::Acquire) {
+            return WindowsVirtualTerminalInputSetup::default();
+        }
+        let setup = operation();
+        if restore_mode.is_none() {
+            *restore_mode = setup.restore_mode;
+        }
+        setup
+    }
+
+    fn take(&self) -> Option<u32> {
+        self.lock().take()
+    }
+}
+
+#[cfg(windows)]
+fn enable_windows_virtual_terminal_input(
+    restore_claimed: &AtomicBool,
+    restore_mode: &WindowsInputModeRestore,
+) -> WindowsVirtualTerminalInputSetup {
+    let setup = restore_mode.activate(restore_claimed, enable_windows_virtual_terminal_input_inner);
+    if let Some(warning) = setup.warning {
+        tracing::warn!("{warning}");
+    }
+    setup
+}
+
+#[cfg(windows)]
+fn enable_windows_virtual_terminal_input_inner() -> WindowsVirtualTerminalInputSetup {
     use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Console::{
         GetConsoleMode, GetStdHandle, SetConsoleMode, ENABLE_VIRTUAL_TERMINAL_INPUT,
@@ -183,44 +234,65 @@ pub(super) fn enable_windows_virtual_terminal_input() -> WindowsVirtualTerminalI
 
     let handle: HANDLE = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
     if handle.is_null() || handle == INVALID_HANDLE_VALUE {
-        tracing::warn!("failed to get Windows console input handle for VT input");
-        return WindowsVirtualTerminalInputSetup::default();
+        return WindowsVirtualTerminalInputSetup {
+            warning: Some("failed to get Windows console input handle for VT input"),
+            ..WindowsVirtualTerminalInputSetup::default()
+        };
     }
 
     let mut mode = 0;
     if unsafe { GetConsoleMode(handle, &mut mode) } == 0 {
-        tracing::warn!("failed to read Windows console input mode for VT input");
-        return WindowsVirtualTerminalInputSetup::default();
+        return WindowsVirtualTerminalInputSetup {
+            warning: Some("failed to read Windows console input mode for VT input"),
+            ..WindowsVirtualTerminalInputSetup::default()
+        };
     }
 
     let desired = windows_virtual_terminal_input_mode(mode);
     if desired == mode {
         return WindowsVirtualTerminalInputSetup {
             active: true,
-            restore_mode: None,
+            ..WindowsVirtualTerminalInputSetup::default()
         };
     }
 
     if unsafe { SetConsoleMode(handle, desired) } == 0 {
-        tracing::warn!("failed to enable Windows virtual terminal input");
-        return WindowsVirtualTerminalInputSetup::default();
+        return WindowsVirtualTerminalInputSetup {
+            warning: Some("failed to enable Windows virtual terminal input"),
+            ..WindowsVirtualTerminalInputSetup::default()
+        };
     }
 
     let mut applied = 0;
     if unsafe { GetConsoleMode(handle, &mut applied) } == 0 {
-        tracing::warn!("failed to verify Windows virtual terminal input mode");
-        let _ = unsafe { SetConsoleMode(handle, mode) };
-        return WindowsVirtualTerminalInputSetup::default();
+        let rollback_failed = unsafe { SetConsoleMode(handle, mode) } == 0;
+        return WindowsVirtualTerminalInputSetup {
+            restore_mode: rollback_failed.then_some(mode),
+            warning: Some(if rollback_failed {
+                "failed to verify or restore Windows virtual terminal input mode"
+            } else {
+                "failed to verify Windows virtual terminal input mode"
+            }),
+            ..WindowsVirtualTerminalInputSetup::default()
+        };
     }
     if applied & ENABLE_VIRTUAL_TERMINAL_INPUT == 0 {
-        tracing::warn!("Windows virtual terminal input bit did not stick");
-        let _ = unsafe { SetConsoleMode(handle, mode) };
-        return WindowsVirtualTerminalInputSetup::default();
+        let rollback_failed = unsafe { SetConsoleMode(handle, mode) } == 0;
+        return WindowsVirtualTerminalInputSetup {
+            restore_mode: rollback_failed.then_some(mode),
+            warning: Some(if rollback_failed {
+                "Windows virtual terminal input bit did not stick and the prior mode could not be restored"
+            } else {
+                "Windows virtual terminal input bit did not stick"
+            }),
+            ..WindowsVirtualTerminalInputSetup::default()
+        };
     }
 
     WindowsVirtualTerminalInputSetup {
         active: true,
         restore_mode: Some(mode),
+        warning: None,
     }
 }
 
@@ -340,11 +412,13 @@ fn restore_terminal_state_once(
     reset_keyboard_enhancements: bool,
     reset_modify_other_keys: bool,
     reset_host_color_scheme_reports: bool,
-    #[cfg(windows)] restore_windows_input_mode: Option<u32>,
+    #[cfg(windows)] restore_windows_input_mode: &WindowsInputModeRestore,
 ) -> io::Result<()> {
     if restore_claimed.swap(true, Ordering::AcqRel) {
         return Ok(());
     }
+    #[cfg(windows)]
+    let restore_windows_input_mode = restore_windows_input_mode.take();
     restore_terminal_state(
         reset_keyboard_enhancements,
         reset_modify_other_keys,
@@ -443,6 +517,19 @@ fn disable_windows_win32_input_mode(writer: &mut impl std::io::Write) -> io::Res
 }
 
 impl TerminalGuard {
+    #[cfg(windows)]
+    pub(super) fn recover_windows_virtual_terminal_input(&self) -> io::Result<()> {
+        let active = enable_windows_virtual_terminal_input(
+            &self.restore_claimed,
+            &self.restore_windows_input_mode,
+        )
+        .active;
+        if active && windows_win32_input_mode_enabled() {
+            enable_windows_win32_input_mode(&mut io::stdout())?;
+        }
+        Ok(())
+    }
+
     /// Captures the restoration state for use by the process panic hook.
     pub(super) fn panic_restore(&self) -> impl Fn() + Send + Sync + 'static {
         let restore_claimed = self.restore_claimed.clone();
@@ -450,7 +537,7 @@ impl TerminalGuard {
         let reset_modify_other_keys = self.reset_modify_other_keys;
         let reset_host_color_scheme_reports = self.reset_host_color_scheme_reports;
         #[cfg(windows)]
-        let restore_windows_input_mode = self.restore_windows_input_mode;
+        let restore_windows_input_mode = self.restore_windows_input_mode.clone();
         move || {
             let _ = restore_terminal_state_once(
                 &restore_claimed,
@@ -458,7 +545,7 @@ impl TerminalGuard {
                 reset_modify_other_keys,
                 reset_host_color_scheme_reports,
                 #[cfg(windows)]
-                restore_windows_input_mode,
+                &restore_windows_input_mode,
             );
         }
     }
@@ -471,7 +558,7 @@ impl TerminalGuard {
             self.reset_modify_other_keys,
             self.reset_host_color_scheme_reports,
             #[cfg(windows)]
-            self.restore_windows_input_mode,
+            &self.restore_windows_input_mode,
         )
     }
 }
@@ -485,7 +572,7 @@ impl Drop for TerminalGuard {
                 self.reset_modify_other_keys,
                 self.reset_host_color_scheme_reports,
                 #[cfg(windows)]
-                self.restore_windows_input_mode,
+                &self.restore_windows_input_mode,
             );
         }
     }
@@ -494,6 +581,51 @@ impl Drop for TerminalGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_input_mode_restore_tracks_recovery_after_cleanup_callback_creation() {
+        let restore_claimed = Arc::new(AtomicBool::new(false));
+        let restore_mode = Arc::new(WindowsInputModeRestore::default());
+        let callback_claimed = restore_claimed.clone();
+        let callback_mode = restore_mode.clone();
+        let cleanup = move || {
+            if callback_claimed.swap(true, Ordering::AcqRel) {
+                None
+            } else {
+                callback_mode.take()
+            }
+        };
+
+        let failed =
+            restore_mode.activate(&restore_claimed, WindowsVirtualTerminalInputSetup::default);
+        assert!(!failed.active);
+        let already_active =
+            restore_mode.activate(&restore_claimed, || WindowsVirtualTerminalInputSetup {
+                active: true,
+                ..WindowsVirtualTerminalInputSetup::default()
+            });
+        assert!(already_active.active);
+        restore_mode.activate(&restore_claimed, || WindowsVirtualTerminalInputSetup {
+            active: true,
+            restore_mode: Some(152),
+            warning: None,
+        });
+        restore_mode.activate(&restore_claimed, || WindowsVirtualTerminalInputSetup {
+            active: true,
+            restore_mode: Some(999),
+            warning: None,
+        });
+
+        assert_eq!(cleanup(), Some(152));
+        assert_eq!(cleanup(), None);
+        let called = AtomicBool::new(false);
+        restore_mode.activate(&restore_claimed, || {
+            called.store(true, Ordering::Release);
+            WindowsVirtualTerminalInputSetup::default()
+        });
+        assert!(!called.load(Ordering::Acquire));
+    }
 
     #[derive(Clone, Default)]
     struct SharedOutput(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);

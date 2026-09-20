@@ -1255,6 +1255,8 @@ pub struct PaneRuntime {
     current_size: Cell<(u16, u16, u32, u32)>,
     child_pid: Arc<AtomicU32>,
     reported_cwd: Arc<Mutex<Option<std::path::PathBuf>>>,
+    persistence_cwd: Mutex<Option<std::path::PathBuf>>,
+    cwd_process_exited: Arc<AtomicBool>,
     child_wait_completed: Option<Arc<AtomicBool>>,
     kitty_keyboard_flags: Arc<AtomicU16>,
     content_seq: Arc<AtomicU64>,
@@ -2304,6 +2306,7 @@ impl PaneRuntime {
         let compression = TerminalCompressionTask::spawn(pane_id, terminal.clone());
         let child_pid = Arc::new(AtomicU32::new(child_pid));
         let reported_cwd = Arc::new(Mutex::new(None));
+        let cwd_process_exited = Arc::new(AtomicBool::new(false));
         let kitty_keyboard_flags = Arc::new(AtomicU16::new(keyboard_protocol_flags));
         let content_seq = Arc::new(AtomicU64::new(0));
         let content_write_lock = Arc::new(Mutex::new(()));
@@ -2370,7 +2373,9 @@ impl PaneRuntime {
                 }
             });
             let exit_events = events.clone();
+            let cwd_process_exited = cwd_process_exited.clone();
             let on_reader_exit = Box::new(move || {
+                cwd_process_exited.store(true, Ordering::Release);
                 // Imported handoff panes have no child wait handle, so their exit cause is
                 // unknowable. Checkpoint conservatively; normal autosave settles clean exits.
                 let _ = rt.block_on(exit_events.send(AppEvent::PaneDied {
@@ -2405,6 +2410,8 @@ impl PaneRuntime {
             current_size: Cell::new((rows, cols, cell_width_px, cell_height_px)),
             child_pid,
             reported_cwd,
+            persistence_cwd: Mutex::new(None),
+            cwd_process_exited,
             child_wait_completed: None,
             kitty_keyboard_flags,
             content_seq,
@@ -2981,6 +2988,8 @@ impl PaneRuntime {
             current_size: Cell::new((rows, cols, 0, 0)),
             child_pid,
             reported_cwd,
+            persistence_cwd: Mutex::new(None),
+            cwd_process_exited: child_wait_completed.clone(),
             child_wait_completed: Some(child_wait_completed),
             kitty_keyboard_flags,
             content_seq,
@@ -3491,6 +3500,27 @@ impl PaneRuntime {
         crate::platform::process_cwd(pid)
     }
 
+    pub fn cwd_for_persistence(&self) -> Option<std::path::PathBuf> {
+        let pid = self.child_pid.load(Ordering::Acquire);
+        let exited = self.cwd_process_exited.load(Ordering::Acquire);
+        if let Some(cwd) = (!exited)
+            .then(|| crate::platform::process_cwd(pid))
+            .flatten()
+            .filter(|cwd| cwd.is_absolute())
+        {
+            // Persistence observations must not change OSC authority or follow-cwd behavior.
+            if let Ok(mut known) = self.persistence_cwd.lock() {
+                *known = Some(cwd.clone());
+            }
+            return Some(cwd);
+        }
+        self.persistence_cwd
+            .lock()
+            .ok()
+            .and_then(|cwd| cwd.clone())
+            .or_else(|| self.reported_cwd.lock().ok().and_then(|cwd| cwd.clone()))
+    }
+
     pub fn child_pid(&self) -> Option<u32> {
         let pid = self.child_pid.load(Ordering::Acquire);
         (pid > 0).then_some(pid)
@@ -3661,6 +3691,8 @@ impl PaneRuntime {
                 current_size: Cell::new((rows, cols, 0, 0)),
                 child_pid: Arc::new(AtomicU32::new(0)),
                 reported_cwd: Arc::new(Mutex::new(None)),
+                persistence_cwd: Mutex::new(None),
+                cwd_process_exited: Arc::new(AtomicBool::new(false)),
                 child_wait_completed: None,
                 kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
                 content_seq: Arc::new(AtomicU64::new(0)),
@@ -4594,6 +4626,23 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn ended_handoff_keeps_persistence_cwd_when_pid_is_reused() {
+        let (runtime, _rx) = PaneRuntime::test_with_channel(80, 24);
+        assert!(runtime.child_wait_completed.is_none());
+        let saved = std::env::temp_dir().join("saved-handoff-cwd");
+        *runtime.persistence_cwd.lock().unwrap() = Some(saved.clone());
+        // A different live process now owns the imported shell's numeric PID.
+        runtime
+            .child_pid
+            .store(std::process::id(), Ordering::Release);
+        runtime.cwd_process_exited.store(true, Ordering::Release);
+        assert_eq!(runtime.cwd_for_persistence(), Some(saved));
+        *runtime.persistence_cwd.lock().unwrap() = None;
+        assert_eq!(runtime.cwd_for_persistence(), None);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn handoff_runtime_state_captures_terminal_input_and_title_state() {
         let runtime = PaneRuntime::test_with_screen_bytes(
             80,
@@ -4749,6 +4798,8 @@ mod tests {
         ));
         let compression = TerminalCompressionTask::spawn(pane_id, terminal.clone());
         let runtime = PaneRuntime {
+            cwd_process_exited: Arc::new(AtomicBool::new(false)),
+            persistence_cwd: Mutex::new(None),
             pane_id,
             terminal,
             io: PaneRuntimeIo::TestChannel {
@@ -4786,6 +4837,8 @@ mod tests {
         ));
         let compression = TerminalCompressionTask::spawn(pane_id, terminal.clone());
         let runtime = PaneRuntime {
+            cwd_process_exited: Arc::new(AtomicBool::new(false)),
+            persistence_cwd: Mutex::new(None),
             pane_id,
             terminal,
             io: PaneRuntimeIo::TestChannel {

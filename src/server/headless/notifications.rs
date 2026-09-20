@@ -321,6 +321,9 @@ impl HeadlessServer {
     ///
     /// Returns true if the event changed visual state (requiring a re-render).
     pub(super) fn handle_internal_event_with_forwarding(&mut self, mut ev: AppEvent) -> bool {
+        if self.host_shutdown_requested.load(Ordering::Acquire) {
+            return false;
+        }
         let mut focused_worktree_response = if let AppEvent::WorktreeAddFinished(result) = &mut ev {
             result
                 .api_request
@@ -752,6 +755,9 @@ impl HeadlessServer {
         let mut had_event = false;
         let mut changed = false;
         for _ in 0..limit {
+            if self.host_shutdown_requested.load(Ordering::Acquire) {
+                break;
+            }
             let Ok(ev) = self.app.event_rx.try_recv() else {
                 break;
             };

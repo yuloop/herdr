@@ -146,6 +146,8 @@ impl PaneLaunchEnv {
 }
 
 fn apply_pane_launch_env(cmd: &mut CommandBuilder, launch_env: &PaneLaunchEnv) {
+    #[cfg(unix)]
+    crate::platform::ssh_agent::apply_pane_env(cmd);
     cmd.env_remove("CODEX_THREAD_ID");
     // OMP sets OMPCODE for shells it spawns. A pane launched from inside OMP
     // must not inherit it or its root agent would look like a nested session.

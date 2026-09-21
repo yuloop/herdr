@@ -74,13 +74,14 @@ fn default_capabilities() -> Option<ServerCapabilities> {
         endpoint_protocol_generation: Some(crate::protocol::endpoint::ENDPOINT_PROTOCOL_GENERATION),
         surface_interest: true,
         health_check: true,
+        ssh_agent_registration: false,
     })
 }
 
 fn start_server_inner(
     api_tx: ApiRequestSender,
     event_hub: EventHub,
-    capabilities: Option<ServerCapabilities>,
+    mut capabilities: Option<ServerCapabilities>,
     server_stop: Option<Arc<AtomicBool>>,
 ) -> std::io::Result<ServerHandle> {
     let path = socket_path();
@@ -90,6 +91,31 @@ fn start_server_inner(
     restrict_socket_permissions(&path)?;
     let identity = socket_file_identity(&path)?;
     info!(path = %path.display(), "api server listening");
+
+    #[cfg(unix)]
+    let ssh_agents = match crate::platform::ssh_agent::SshAgentRegistry::new(
+        crate::platform::ssh_agent::socket_path(),
+        std::env::var_os("SSH_AUTH_SOCK").map(PathBuf::from),
+    ) {
+        Ok(registry) => Some(registry),
+        Err(error) => {
+            warn!(%error, "SSH agent refresh unavailable; retaining inherited pane environment");
+            None
+        }
+    };
+
+    if let Some(capabilities) = capabilities.as_mut() {
+        capabilities.ssh_agent_registration = {
+            #[cfg(unix)]
+            {
+                ssh_agents.is_some()
+            }
+            #[cfg(not(unix))]
+            {
+                false
+            }
+        };
+    }
 
     let running = Arc::new(AtomicBool::new(true));
     let listener_running = Arc::clone(&running);
@@ -102,6 +128,8 @@ fn start_server_inner(
                     let capabilities = capabilities.clone();
                     let server_stop = server_stop.clone();
                     let connection_running = Arc::clone(&listener_running);
+                    #[cfg(unix)]
+                    let ssh_agents = ssh_agents.clone();
                     std::thread::spawn(move || {
                         if let Err(err) = handle_connection_with_stop(
                             stream,
@@ -110,6 +138,8 @@ fn start_server_inner(
                             &connection_running,
                             capabilities,
                             server_stop.as_ref(),
+                            #[cfg(unix)]
+                            ssh_agents.as_ref(),
                         ) {
                             warn!(err = %err, "api connection failed");
                         }
@@ -153,7 +183,16 @@ fn handle_connection(
     running: &Arc<AtomicBool>,
     capabilities: Option<ServerCapabilities>,
 ) -> std::io::Result<()> {
-    handle_connection_with_stop(stream, api_tx, event_hub, running, capabilities, None)
+    handle_connection_with_stop(
+        stream,
+        api_tx,
+        event_hub,
+        running,
+        capabilities,
+        None,
+        #[cfg(unix)]
+        None,
+    )
 }
 
 fn handle_connection_with_stop(
@@ -163,6 +202,7 @@ fn handle_connection_with_stop(
     running: &Arc<AtomicBool>,
     capabilities: Option<ServerCapabilities>,
     server_stop: Option<&Arc<AtomicBool>>,
+    #[cfg(unix)] ssh_agents: Option<&crate::platform::ssh_agent::SshAgentRegistry>,
 ) -> std::io::Result<()> {
     if let Err(err) = stream.set_send_timeout(Some(STREAM_WRITE_TIMEOUT)) {
         debug!(err = %err, "api connection write timeout unavailable");
@@ -213,6 +253,49 @@ fn handle_connection_with_stop(
     crate::logging::api_request_started(&request_id, method, changes_ui);
 
     match request.method {
+        #[cfg(unix)]
+        Method::ServerSshAgentRegister(params) => {
+            let lease = ssh_agents
+                .ok_or_else(|| io::Error::other("SSH agent registration is unavailable"))
+                .and_then(|registry| registry.register(PathBuf::from(params.socket_path)));
+            let lease = match lease {
+                Ok(lease) => lease,
+                Err(error) => {
+                    return write_text_line_allow_disconnect(
+                        &mut stream,
+                        &error_response_json(
+                            request_id,
+                            if error.kind() == io::ErrorKind::InvalidInput {
+                                "invalid_ssh_agent"
+                            } else {
+                                "ssh_agent_unavailable"
+                            },
+                            error.to_string(),
+                        ),
+                    )
+                }
+            };
+            write_json_line(
+                &mut stream,
+                &SuccessResponse {
+                    id: request_id,
+                    result: ResponseResult::Ok {},
+                },
+            )?;
+            set_local_stream_polling(&mut stream, true)?;
+            let mut byte = [0];
+            while running.load(Ordering::Relaxed) {
+                match poll_local_stream_read(&mut stream, &mut byte)? {
+                    LocalStreamRead::Pending => {
+                        // SSH can unlink an inherited socket after its bridge's lease closes.
+                        lease.refresh()?;
+                        std::thread::sleep(CONNECTION_POLL_INTERVAL);
+                    }
+                    _ => break,
+                }
+            }
+            Ok(())
+        }
         Method::PaneGraphicsStream(params) => {
             let result =
                 pane_graphics_stream::serve(stream, request_id.clone(), params, api_tx, running);
@@ -404,6 +487,7 @@ pub(crate) fn api_method_name(method: &Method) -> &'static str {
         Method::ServerStop(_) => "server.stop",
         Method::ServerLiveHandoff(_) => "server.live_handoff",
         Method::ServerReloadConfig(_) => "server.reload_config",
+        Method::ServerSshAgentRegister(_) => "server.ssh_agent.register",
         Method::ServerAgentManifests(_) => "server.agent_manifests",
         Method::ServerReloadAgentManifests(_) => "server.reload_agent_manifests",
         Method::NotificationShow(_) => "notification.show",
@@ -1026,6 +1110,53 @@ mod tests {
         (client, server, path)
     }
 
+    #[test]
+    fn ssh_agent_registration_lasts_only_for_the_api_connection() {
+        let directory = unique_test_path("agent-lease");
+        fs::create_dir(&directory).unwrap();
+        let agent = directory.join("upstream");
+        let _agent = UnixListener::bind(&agent).unwrap();
+        let stable = directory.join("stable");
+        let registry =
+            crate::platform::ssh_agent::SshAgentRegistry::new(stable.clone(), None).unwrap();
+        let (mut client, server, api_path) = local_stream_pair("agent-api");
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let worker_registry = registry.clone();
+        let worker = std::thread::spawn(move || {
+            handle_connection_with_stop(
+                server,
+                &tx,
+                &EventHub::default(),
+                &Arc::new(AtomicBool::new(true)),
+                None,
+                None,
+                Some(&worker_registry),
+            )
+            .unwrap();
+        });
+        write_json_line(
+            &mut client,
+            &Request {
+                id: "agent-lease".into(),
+                method: Method::ServerSshAgentRegister(
+                    crate::api::schema::ServerSshAgentRegisterParams {
+                        socket_path: agent.to_string_lossy().into_owned(),
+                    },
+                ),
+            },
+        )
+        .unwrap();
+        let response: SuccessResponse = serde_json::from_str(&read_line(&mut client)).unwrap();
+        assert!(matches!(response.result, ResponseResult::Ok {}));
+        assert_eq!(fs::read_link(&stable).unwrap(), agent);
+        drop(client);
+        worker.join().unwrap();
+        assert!(!stable.exists());
+        drop(registry);
+        fs::remove_file(api_path).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+    }
+
     fn pane_info(
         pane_id: &str,
         agent_status: crate::api::schema::AgentStatus,
@@ -1186,6 +1317,7 @@ mod tests {
                 ),
                 surface_interest: true,
                 health_check: true,
+                ssh_agent_registration: false,
             }),
             None,
             None,

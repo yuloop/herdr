@@ -768,6 +768,7 @@ fn success_response_round_trips() {
                 endpoint_protocol_generation: Some(1),
                 surface_interest: true,
                 health_check: true,
+                ssh_agent_registration: false,
             }),
         },
     };

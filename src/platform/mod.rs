@@ -81,7 +81,9 @@ impl ChildExitReason {
 }
 
 #[cfg(unix)]
-pub(crate) use unix_common::{classify_child_exit, poll_fd_readable, read_fd};
+pub(crate) use unix_common::{
+    classify_child_exit, poll_fd_readable, read_fd, shared_ssh_control_path,
+};
 
 #[cfg(not(any(unix, windows)))]
 pub(crate) fn classify_child_exit(_status: &portable_pty::ExitStatus) -> ChildExitReason {
@@ -711,4 +713,15 @@ mod tests {
             LimitedRead::Complete(b"image".to_vec())
         );
     }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn shared_ssh_control_path(
+    _namespace: &std::path::Path,
+    _target: &str,
+) -> std::io::Result<std::path::PathBuf> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "interactive SSH recovery requires Unix OpenSSH multiplexing",
+    ))
 }

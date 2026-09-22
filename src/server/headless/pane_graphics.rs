@@ -13,7 +13,7 @@ impl HeadlessServer {
         msg: api::ApiRequestMessage,
     ) -> RenderImpact {
         if self.shutting_down {
-            let _ = self.handle_api_request_with_shutdown_check_inner(msg, false);
+            let _ = self.handle_api_request_with_shutdown_check_inner(msg, false, false);
             return RenderImpact::None;
         }
 

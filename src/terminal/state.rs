@@ -14,14 +14,23 @@ use crate::terminal::TerminalId;
 mod metadata;
 pub use metadata::{AgentMetadata, AgentMetadataReport, EffectivePresentation};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct HookAuthority {
     pub source: String,
     pub agent_label: String,
     pub state: AgentState,
     pub message: Option<String>,
+    #[serde(skip, default = "Instant::now")]
     pub reported_at: Instant,
     pub session_ref: Option<crate::agent_resume::AgentSessionRef>,
+}
+
+#[cfg(unix)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct HandoffAgentState {
+    authority: HookAuthority,
+    sequence: Option<u64>,
+    acquisition_pending: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,6 +220,31 @@ impl TerminalState {
             self.agent_process_acquisition_pending = true;
         }
         mutation
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn handoff_agent_state(&self) -> Option<HandoffAgentState> {
+        if !self.live_full_lifecycle_hook_authority() {
+            return None;
+        }
+        let authority = self.hook_authority.as_ref()?;
+        Some(HandoffAgentState {
+            authority: authority.clone(),
+            sequence: self.hook_report_sequences.get(&authority.source).copied(),
+            acquisition_pending: self.agent_process_acquisition_pending,
+        })
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn restore_handoff_agent_state(&mut self, snapshot: HandoffAgentState) {
+        if let Some(sequence) = snapshot.sequence {
+            self.hook_report_sequences
+                .insert(snapshot.authority.source.clone(), sequence);
+        }
+        self.detected_agent = crate::detect::parse_agent_label(&snapshot.authority.agent_label);
+        self.state = snapshot.authority.state;
+        self.hook_authority = Some(snapshot.authority);
+        self.agent_process_acquisition_pending = snapshot.acquisition_pending;
     }
 
     pub(crate) fn finish_agent_process_acquisition(&mut self) -> bool {

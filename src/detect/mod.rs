@@ -7,7 +7,7 @@ pub mod manifest;
 pub mod manifest_update;
 
 /// The detected state of a terminal pane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AgentState {
     /// Agent finished, prompt visible, nothing happening.
     Idle,

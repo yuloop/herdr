@@ -1804,7 +1804,7 @@ async fn deferred_worktree_response_moves_only_its_source_client() {
         .get_mut(&51)
         .unwrap()
         .shell_deferred_navigation_response = Some(Vec::new());
-    let response = serde_json::json!({
+    let mut response = serde_json::json!({
         "id": "create-worktree",
         "result": {
             "type": "worktree_created",
@@ -1832,6 +1832,40 @@ async fn deferred_worktree_response_moves_only_its_source_client() {
         Some(original_tab_id.as_str())
     );
 
+    assert!(server.focus_shell_client_on_tab(51, &original_tab_id));
+    response["result"]["type"] = serde_json::json!("worktree_opened");
+    server
+        .clients
+        .get_mut(&51)
+        .unwrap()
+        .shell_endpoint_command_surface_revision = Some(source_surface_revision);
+    server
+        .clients
+        .get_mut(&51)
+        .unwrap()
+        .shell_endpoint_command_in_flight = true;
+    server
+        .clients
+        .get_mut(&51)
+        .unwrap()
+        .shell_deferred_navigation_response = Some(Vec::new());
+    assert!(
+        server.handle_server_event(ServerEvent::ClientShellEndpointResponseChunkReady {
+            client_id: 51,
+            boot_id: server.client_shell_boot_id.clone(),
+            request_id: "open-worktree".into(),
+            final_chunk: true,
+            data: serde_json::to_vec(&response).unwrap(),
+        })
+    );
+    assert_eq!(
+        server.shell_tab_id_for_client(51).as_deref(),
+        Some(created_tab_id.as_str())
+    );
+    assert_eq!(
+        server.shell_tab_id_for_client(52).as_deref(),
+        Some(original_tab_id.as_str())
+    );
     assert!(server.focus_shell_client_on_tab(51, &original_tab_id));
     // A source command begun in the old presentation epoch may finish after source-off and
     // source-on rollback. Its response remains endpoint-local, but it must not apply deferred
@@ -3140,6 +3174,219 @@ async fn client_shell_release_under_popup_renders_when_it_resets_scrollback() {
     assert_eq!(render_impact, RenderImpact::Full);
     assert!(!input_rx.recv().await.expect("encoded release").is_empty());
     shutdown_test_runtimes(&mut server);
+}
+
+#[tokio::test]
+async fn worktree_discovery_does_not_block_client_typing() {
+    use api::schema::{Method, WorktreeListParams, WorktreeOpenParams};
+
+    let mut server = test_headless_server();
+    let mut workspace = crate::workspace::Workspace::test_new("worktree-input");
+    let pane_id = workspace.tabs[0].root_pane;
+    let (runtime, mut input_rx) =
+        crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(80, 24, 0, b"", 4);
+    workspace.insert_test_runtime(pane_id, runtime);
+    let repo = std::env::temp_dir().join(format!("herdr-blocked-git-{}", workspace.id));
+    workspace.identity_cwd = repo.clone();
+    workspace.cached_git_space = Some(crate::workspace::GitSpaceMetadata {
+        key: repo.display().to_string(),
+        checkout_key: repo.display().to_string(),
+        repo_name: "blocked-git".into(),
+        repo_root: repo.clone(),
+        is_linked_worktree: false,
+    });
+    let workspace_id = workspace.id.clone();
+    server.app.state.workspaces = vec![workspace];
+    server.app.state.active = Some(0);
+    server.app.state.selected = 0;
+    let public_pane_id = server.app.public_pane_id(0, pane_id).unwrap();
+    server.clients.insert(
+        11,
+        ClientConnection::new_with_mode(
+            ClientConnectionMode::ClientShell,
+            (80, 24),
+            crate::kitty_graphics::HostCellSize::default(),
+            1,
+            RenderEncoding::SemanticFrame,
+            None,
+        ),
+    );
+    server.foreground_client_id = Some(11);
+
+    for (linked, method) in [
+        (
+            false,
+            Method::WorktreeList(WorktreeListParams {
+                workspace_id: Some(workspace_id.clone()),
+                ..Default::default()
+            }),
+        ),
+        (
+            true,
+            Method::WorktreeList(WorktreeListParams {
+                workspace_id: Some(workspace_id.clone()),
+                ..Default::default()
+            }),
+        ),
+        (
+            false,
+            Method::WorktreeOpen(WorktreeOpenParams {
+                workspace_id: Some(workspace_id),
+                path: Some(repo.display().to_string()),
+                focus: true,
+                ..Default::default()
+            }),
+        ),
+    ] {
+        server.app.state.workspaces[0]
+            .cached_git_space
+            .as_mut()
+            .unwrap()
+            .is_linked_worktree = linked;
+        let (entered, release) = crate::worktree::test_list_gate::block(&repo);
+        let (respond_to, response_rx) = std::sync::mpsc::channel();
+        server.handle_api_request_with_shutdown_check(api::ApiRequestMessage {
+            request: api::schema::Request {
+                id: "blocked-read".into(),
+                method,
+            },
+            respond_to,
+            response_write_complete: None,
+            stream_active: None,
+        });
+        entered
+            .recv_timeout(Duration::from_secs(5))
+            .expect("Git discovery started");
+        assert!(response_rx.try_recv().is_err(), "Git must still be blocked");
+        server.handle_server_event(ServerEvent::ClientShellPaneInput {
+            client_id: 11,
+            pane_id: public_pane_id.clone(),
+            events: vec![protocol::ClientPaneInputEvent::TextCommit("x".into())],
+        });
+        assert_eq!(
+            input_rx
+                .try_recv()
+                .expect("typing reaches PTY while Git is blocked"),
+            Bytes::from_static(b"x")
+        );
+        release.send(()).unwrap();
+        let event = tokio::time::timeout(Duration::from_secs(5), server.app.event_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        server.handle_internal_event_with_forwarding(event);
+        let response: api::schema::ErrorResponse =
+            serde_json::from_str(&response_rx.recv_timeout(Duration::from_secs(5)).unwrap())
+                .unwrap();
+        assert_eq!(response.error.code, "worktree_list_failed");
+    }
+    shutdown_test_runtimes(&mut server);
+}
+
+#[tokio::test]
+async fn deferred_worktree_open_disconnect_keeps_other_clients_focus() {
+    let mut server = test_headless_server();
+    let mut source = crate::workspace::Workspace::test_new("pending-open-source");
+    let repo = std::env::temp_dir().join(format!("herdr-disconnected-open-{}", source.id));
+    let checkout = repo.with_extension("checkout");
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&["init", "--quiet", repo.to_str().unwrap()]);
+    git(&[
+        "-C",
+        repo.to_str().unwrap(),
+        "-c",
+        "user.name=Herdr Test",
+        "-c",
+        "user.email=herdr@example.invalid",
+        "commit",
+        "--quiet",
+        "--allow-empty",
+        "-m",
+        "initial",
+    ]);
+    git(&[
+        "-C",
+        repo.to_str().unwrap(),
+        "worktree",
+        "add",
+        "--quiet",
+        "-b",
+        "pending-open",
+        checkout.to_str().unwrap(),
+    ]);
+    source.identity_cwd = repo.clone();
+    let source_id = source.id.clone();
+    let mut target = crate::workspace::Workspace::test_new("pending-open-target");
+    target.identity_cwd = checkout.clone();
+    server.app.state.workspaces = vec![source, target];
+    server.app.state.ensure_test_terminals();
+    server.app.state.active = Some(0);
+    server.app.state.selected = 0;
+    let (source_control, _) = connect_matching_test_shell(&mut server, 51);
+    let (other_control, _) = connect_matching_test_shell(&mut server, 52);
+    let _ = source_control.recv().unwrap();
+    let _ = other_control.recv().unwrap();
+    let original_tab = server.shell_tab_id_for_client(52);
+
+    let (entered, release) = crate::worktree::test_list_gate::block(&repo);
+    server.handle_server_event(ServerEvent::ClientShellEndpointRequest {
+        client_id: 51,
+        boot_id: server.client_shell_boot_id.clone(),
+        request: Box::new(api::schema::Request {
+            id: "open-before-disconnect".into(),
+            method: api::schema::Method::WorktreeOpen(api::schema::WorktreeOpenParams {
+                workspace_id: Some(source_id),
+                branch: Some("pending-open".into()),
+                focus: true,
+                ..Default::default()
+            }),
+        }),
+    });
+    entered
+        .recv_timeout(Duration::from_secs(5))
+        .expect("Git started");
+    server.handle_server_event(ServerEvent::ClientDisconnected { client_id: 51 });
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let event = server.app.event_rx.recv().await.unwrap();
+            let completed = matches!(&event, AppEvent::WorktreeReadFinished(_));
+            server.handle_internal_event_with_forwarding(event);
+            if completed {
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        server.app.state.workspaces[1].worktree_space().is_some(),
+        "open completed successfully"
+    );
+    assert_eq!(
+        server.shell_tab_id_for_client(52),
+        original_tab,
+        "disconnected endpoint must not turn into public navigation"
+    );
+    shutdown_test_runtimes(&mut server);
+    git(&[
+        "-C",
+        repo.to_str().unwrap(),
+        "worktree",
+        "remove",
+        checkout.to_str().unwrap(),
+    ]);
+    let _ = std::fs::remove_dir_all(repo);
 }
 
 #[tokio::test]

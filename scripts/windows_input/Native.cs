@@ -389,7 +389,7 @@ namespace HerdrInputGauntlet {
         [DllImport("kernel32.dll")] static extern bool SetConsoleCP(uint cp);
         [DllImport("kernel32.dll")] static extern bool ReadFile(IntPtr handle,byte[] buffer,uint size,out uint count,IntPtr overlap);
         [DllImport("kernel32.dll")] static extern bool WriteFile(IntPtr handle,byte[] buffer,uint size,out uint count,IntPtr overlap);
-        [DllImport("kernel32.dll")] static extern bool ReadConsoleInputW(IntPtr handle,Record[] records,uint size,out uint count);
+        [DllImport("kernel32.dll")] static extern bool ReadConsoleInputW(IntPtr handle,[Out] Record[] records,uint size,out uint count);
         [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
         [DllImport("kernel32.dll")] static extern IntPtr OpenThread(uint access,bool inherit,uint id);
         [DllImport("kernel32.dll")] static extern bool CancelSynchronousIo(IntPtr thread);
@@ -459,7 +459,11 @@ namespace HerdrInputGauntlet {
         public void Clear() { lock(gate) { bytes.Clear(); records.Clear(); } }
         public bool ClearIfCount(int expected) {
             lock(gate) {
-                if(bytes.Count+records.Count!=expected) return false;
+                if(bytes.Count+records.Count!=expected) {
+                    if(!native || bytes.Count!=0 || records.Count<expected) return false;
+                    for(int i=expected;i<records.Count;i++)
+                        if(records[i][0]!=4 && records[i][0]!=16) return false; // resize/focus between captures
+                }
                 bytes.Clear(); records.Clear(); return true;
             }
         }

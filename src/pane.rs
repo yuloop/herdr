@@ -3654,6 +3654,13 @@ impl PaneRuntime {
 
 #[cfg(test)]
 impl PaneRuntime {
+    #[cfg(unix)]
+    pub(crate) fn test_enable_kitty_source_forwarding(&self) {
+        let mut core = self.terminal.ghostty.core.lock().unwrap();
+        core.terminal.enable_kitty_graphics().unwrap();
+        core.terminal.set_kitty_source_forwarding(true).unwrap();
+    }
+
     pub(crate) fn test_with_channel(cols: u16, rows: u16) -> (Self, mpsc::Receiver<Bytes>) {
         Self::test_with_channel_and_scrollback_bytes(cols, rows, 0, &[], 4)
     }

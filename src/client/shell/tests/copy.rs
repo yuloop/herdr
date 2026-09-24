@@ -1567,7 +1567,7 @@ fn navigator_narrow_layout_and_long_search_stay_inside_the_popup() {
         navigator.query = "界".repeat(100).as_str().into();
         let frame = state.compose(width, height).expect("navigator frame");
         let popup = state.hits.navigator_popup;
-        let cursor = frame.cursor.expect("search cursor");
+        let cursor = frame.cursor.as_ref().expect("search cursor");
         assert!(super::super::contains(popup, (cursor.x, cursor.y)));
         assert!(state.hits.navigator_rows.is_empty());
         assert!(popup.right() <= width && popup.bottom() <= height);

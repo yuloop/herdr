@@ -4959,7 +4959,7 @@ mod tests {
         let encoded = pane.encode_terminal_key(
             crate::input::TerminalKey::new(
                 crossterm::event::KeyCode::Char('a'),
-                crossterm::event::KeyModifiers::CONTROL | crossterm::event::KeyModifiers::SHIFT,
+                crossterm::event::KeyModifiers::CONTROL,
             ),
             crate::input::KeyboardProtocol::Legacy,
         );

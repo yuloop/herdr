@@ -230,6 +230,11 @@ impl RawInputByteFramer {
     }
 
     #[cfg(unix)]
+    pub(crate) fn has_pending_csi_introducer(&self) -> bool {
+        self.buffer.as_slice() == b"\x1b["
+    }
+
+    #[cfg(unix)]
     pub(crate) fn has_pending_incomplete_mouse_sequence(&self) -> bool {
         starts_with_incomplete_sgr_mouse_sequence(&self.buffer)
             || starts_with_incomplete_default_mouse_sequence(&self.buffer)

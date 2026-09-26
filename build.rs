@@ -1,34 +1,3 @@
-use std::env;
-use std::fs;
-use std::path::PathBuf;
-use std::process::Command;
-
-fn zig_target(target: &str) -> &str {
-    match target {
-        "x86_64-unknown-linux-gnu" => "x86_64-linux-gnu",
-        "aarch64-unknown-linux-gnu" => "aarch64-linux-gnu",
-        "x86_64-unknown-linux-musl" => "x86_64-linux-musl",
-        "aarch64-unknown-linux-musl" => "aarch64-linux-musl",
-        "x86_64-apple-darwin" => "x86_64-macos",
-        "aarch64-apple-darwin" => "aarch64-macos",
-        "x86_64-pc-windows-msvc" => "x86_64-windows-msvc",
-        "aarch64-pc-windows-msvc" => "aarch64-windows-msvc",
-        other => panic!("unsupported target for libghostty-vt build: {other}"),
-    }
-}
-
-fn env_bool(name: &str) -> Option<bool> {
-    match env::var(name) {
-        Ok(value) => match value.to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => Some(true),
-            "0" | "false" | "no" | "off" => Some(false),
-            other => panic!("invalid boolean value for {name}: {other}"),
-        },
-        Err(env::VarError::NotPresent) => None,
-        Err(err) => panic!("failed to read {name}: {err}"),
-    }
-}
-
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=locales/en.yml");

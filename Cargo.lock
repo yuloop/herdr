@@ -861,6 +861,7 @@ dependencies = [
  "crossterm",
  "ctrlc",
  "futures-util",
+ "ghostty-vt",
  "interprocess",
  "jsonc-parser",
  "libc",

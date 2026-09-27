@@ -794,6 +794,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghostty-vt"
+version = "0.0.0"
+dependencies = [
+ "base64",
+ "libc",
+ "png",
+ "tracing",
+]
+
+[[package]]
 name = "glob"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

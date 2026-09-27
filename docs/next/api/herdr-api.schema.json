@@ -2989,6 +2989,16 @@
             "pane_id": {
               "type": "string"
             },
+            "resume_argv": {
+              "description": "Command that resumes this agent's session after a Herdr restart. The\nfirst element must be a plain command name.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
             "seq": {
               "format": "uint64",
               "minimum": 0,
@@ -3031,6 +3041,16 @@
             },
             "pane_id": {
               "type": "string"
+            },
+            "resume_argv": {
+              "description": "Command that resumes this agent's session after a Herdr restart. The\nfirst element must be a plain command name.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
             },
             "seq": {
               "format": "uint64",

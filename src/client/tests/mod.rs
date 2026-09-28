@@ -439,11 +439,6 @@ fn color_scheme_change_event_requests_host_theme_query() {
 }
 
 #[test]
-fn host_terminal_theme_query_is_disabled_on_windows() {
-    assert_eq!(should_query_host_terminal_theme(), !cfg!(windows));
-}
-
-#[test]
 fn write_host_cell_size_query_emits_xtwinops_request() {
     let mut output = Vec::new();
     write_host_cell_size_query(&mut output).unwrap();

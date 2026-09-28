@@ -1497,6 +1497,9 @@ mod tests {
 
     #[test]
     fn identify_agent_in_job_detects_node_wrapped_pi_bundled_cli() {
+        // Hardened runtimes deny `PROCESS_VM_READ`, so the command line can come
+        // from a LimitedInformation query with the launcher path intact. The
+        // detection path must not depend on how that command line was obtained.
         let job = crate::platform::ForegroundJob {
             process_group_id: 123,
             processes: vec![foreground_process(

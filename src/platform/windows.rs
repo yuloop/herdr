@@ -315,11 +315,13 @@ pub(crate) fn set_default_plugin_pane_pwd(
 }
 
 use windows_sys::{
+    Wdk::System::Threading::ProcessCommandLineInformation,
     Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation},
     Win32::{
         Foundation::{
             CloseHandle, GlobalFree, LocalFree, FILETIME, HANDLE, HWND, INVALID_HANDLE_VALUE,
-            MAX_PATH, NTSTATUS, STATUS_SUCCESS, UNICODE_STRING,
+            MAX_PATH, NTSTATUS, STATUS_BUFFER_OVERFLOW, STATUS_BUFFER_TOO_SMALL,
+            STATUS_INFO_LENGTH_MISMATCH, STATUS_SUCCESS, UNICODE_STRING,
         },
         Globalization::{CompareStringOrdinal, CSTR_EQUAL, CSTR_GREATER_THAN, CSTR_LESS_THAN},
         Security::SECURITY_ATTRIBUTES,
@@ -1829,6 +1831,19 @@ impl ProcessSnapshotCache {
 }
 
 fn read_process_command(pid: u32, name: &str) -> WindowsProcessCommand {
+    // Prefer the command-line information class: it needs only
+    // `PROCESS_QUERY_LIMITED_INFORMATION`, while the PEB path below also needs
+    // `PROCESS_VM_READ`, which hardened runtimes (Electron/Node) and security
+    // products deny. Without a command line an agent launched through a runtime
+    // is indistinguishable from a bare `node.exe`/`bun.exe` process, so the
+    // pane would never register as an agent.
+    if let Some(process) = ProcessHandle::open(pid, PROCESS_QUERY_LIMITED_INFORMATION) {
+        if let Some(cmdline) = read_process_command_line(process.0) {
+            let creation_time = process_creation_time(process.0);
+            return WindowsProcessCommand::from_cmdline(name, creation_time, Some(cmdline));
+        }
+    }
+
     let Some(process) =
         ProcessHandle::open(pid, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ)
     else {
@@ -2138,6 +2153,89 @@ fn environment_variable_from_utf16(environment: &[u16], name: &str) -> Option<St
         }
     }
     None
+}
+
+/// Read a process command line with only `PROCESS_QUERY_LIMITED_INFORMATION`.
+///
+/// `ProcessCommandLineInformation` has been available since Windows 8.1.
+/// Prefer it over walking the target PEB, which additionally requires
+/// `PROCESS_VM_READ` access that hardened runtimes and security products deny.
+///
+/// Returns `None` for a process without a stored command line; the caller then
+/// tries the PEB path before giving up.
+fn read_process_command_line(process: HANDLE) -> Option<String> {
+    let mut required = 0_u32;
+    // SAFETY: a null buffer with length 0 only asks for the required size, and
+    // `required` is a valid out-pointer for the duration of the call.
+    let status = unsafe {
+        NtQueryInformationProcess(
+            process,
+            ProcessCommandLineInformation,
+            null_mut(),
+            0,
+            &mut required,
+        )
+    };
+    // A process with no command line is already handled as a miss below.
+    if status != STATUS_BUFFER_TOO_SMALL
+        && status != STATUS_INFO_LENGTH_MISMATCH
+        && status != STATUS_BUFFER_OVERFLOW
+    {
+        return None;
+    }
+
+    // `required` is already at least a UNICODE_STRING sized buffer.
+    let mut buffer = vec![0_u8; required as usize];
+    for _ in 0..2 {
+        // SAFETY: `buffer` is `required` bytes and both pointers are valid for
+        // the call; the kernel writes the length back into `required`.
+        let status = unsafe {
+            NtQueryInformationProcess(
+                process,
+                ProcessCommandLineInformation,
+                buffer.as_mut_ptr().cast(),
+                required,
+                &mut required,
+            )
+        };
+        // These three statuses all mean the command line grew between the probe
+        // and the read. Some data was written; retry once with the larger buffer
+        // the call just reported. They are negative as `NTSTATUS`, so they must
+        // be checked before the failure test below.
+        let grew = status == STATUS_BUFFER_OVERFLOW
+            || status == STATUS_BUFFER_TOO_SMALL
+            || status == STATUS_INFO_LENGTH_MISMATCH;
+        if grew {
+            buffer = vec![0_u8; required as usize];
+            continue;
+        }
+        if status < 0 {
+            return None;
+        }
+        break;
+    }
+
+    // SAFETY: on success the kernel wrote a UNICODE_STRING followed by its
+    // UTF-16 contents into `buffer`. A `Vec<u8>` only guarantees byte
+    // alignment, so read the header unaligned.
+    let unicode = unsafe { buffer.as_ptr().cast::<UNICODE_STRING>().read_unaligned() };
+    let length = usize::from(unicode.Length);
+    // A short command line leaves `Length` inside the header itself; guard
+    // against reading a malformed header as string data.
+    if length == 0 || !length.is_multiple_of(2) {
+        return None;
+    }
+    let string_offset = size_of::<UNICODE_STRING>();
+    if string_offset + length > buffer.len() {
+        return None;
+    }
+    let units = buffer[string_offset..string_offset + length]
+        .chunks_exact(2)
+        .map(|unit| u16::from_ne_bytes([unit[0], unit[1]]))
+        .collect::<Vec<_>>();
+    String::from_utf16(&units)
+        .ok()
+        .filter(|command_line| !command_line.is_empty())
 }
 
 fn read_process_parameters(process: HANDLE) -> Option<RtlUserProcessParameters> {
@@ -3610,6 +3708,59 @@ mod tests {
         let _ = child.wait();
 
         assert_eq!(observed.as_deref(), Some("pane-test"));
+    }
+
+    #[test]
+    fn windows_process_command_line_reads_live_process_with_limited_access() {
+        // The point of the fix: the command line must be readable from a handle
+        // that does not request `PROCESS_VM_READ`. Verification against a
+        // process that actually denies that access needs a hardened host, which
+        // this suite cannot provide.
+        let handle = super::ProcessHandle::open(
+            std::process::id(),
+            super::PROCESS_QUERY_LIMITED_INFORMATION,
+        )
+        .expect("open self with limited access");
+
+        let command_line =
+            super::read_process_command_line(handle.0).expect("command line must be readable");
+        assert!(
+            !command_line.is_empty(),
+            "command line for the test process must not be empty"
+        );
+    }
+
+    #[test]
+    fn windows_process_command_line_reads_spawned_process_marker() {
+        let shell =
+            std::env::var_os("ComSpec").unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".into());
+        // `rem` keeps the marker inside cmd.exe's own command line without
+        // becoming a target for `ping`, so the process stays alive for the read.
+        let mut child = Command::new(shell)
+            .args([
+                "/D",
+                "/Q",
+                "/C",
+                "ping -n 11 127.0.0.1 > NUL & rem unique-cmdline-marker",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn cmd");
+
+        let command_line =
+            super::ProcessHandle::open(child.id(), super::PROCESS_QUERY_LIMITED_INFORMATION)
+                .and_then(|process| super::read_process_command_line(process.0));
+
+        let _ = child.kill();
+        let _ = child.wait();
+
+        let command_line = command_line.expect("command line must be readable");
+        assert!(
+            command_line.contains("unique-cmdline-marker"),
+            "unexpected command line: {command_line}"
+        );
     }
 
     #[test]

@@ -72,7 +72,7 @@ pub(crate) fn keybind_help_groups(
             Cow::Owned(rust_i18n::t!("keybind.group_global").to_string()),
             vec![
                 entry(
-                    crate::config::format_key_combo(prefix),
+                    crate::config::format_prefix_combos(prefixes),
                     Cow::Owned(rust_i18n::t!("keybind.prefix_mode").to_string()),
                 ),
                 entry(

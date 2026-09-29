@@ -113,6 +113,8 @@ Herdr's pane text copy works on Windows. Drag-select text inside a pane to copy 
 
 For text paste, use `ctrl+shift+v` in Windows Terminal. Multiline text paste is bracketed so shells and agent prompts receive it as one paste instead of submitting each line separately. Hold `shift` and right-click to use the outer terminal paste action instead of sending the click through Herdr.
 
+Windows clients also recover text when WezTerm wraps a complete sequence of Win32 character press/release pairs in raw paste markers. Mixed text and incomplete reports are not decoded by this compatibility rule. Literal clipboard text consisting entirely of matching Win32 reports is indistinguishable from this encoding and is decoded too.
+
 ## Not supported on Windows
 
 | Capability | Status |

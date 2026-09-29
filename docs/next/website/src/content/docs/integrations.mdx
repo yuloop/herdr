@@ -3,7 +3,7 @@ title: Integrations
 description: Install Herdr integrations for Pi, OMP, Claude Code, Codex, Qwen Code, GitHub Copilot CLI, Devin CLI, Droid, Kimi Code CLI, OpenCode, Kilo Code CLI, Hermes Agent, Qoder CLI, Cursor Agent CLI, MastraCode, Antigravity CLI, and Grok CLI.
 ---
 
-Herdr detects supported agents automatically. Install official integrations when you want native agent session restore, direct lifecycle reports, or both. See [Agents](/docs/agents/) for the full status authority model.
+Herdr detects the agents it supports automatically. Install an agent's integration so Herdr can resume the same session after a server restart. Some integrations also report the agent's state directly. See [Agents](/docs/agents/) for which agents Herdr supports and which support Herdr themselves.
 
 ## Install integrations
 
@@ -59,7 +59,7 @@ Herdr saves integration configs atomically on Linux/macOS and for new files; exi
 
 ## How Herdr uses integrations
 
-Herdr uses integrations in two ways:
+Every integration tells Herdr which session the agent is in, so Herdr can resume it after a server restart. Turn this off with `[session] resume_agents_on_restore = false`.
 
 | Integration type | Agents | Effect |
 | --- | --- | --- |

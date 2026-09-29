@@ -47,7 +47,7 @@ pub(crate) fn connect_local_stream(path: &Path) -> io::Result<LocalStream> {
 
         let name = path.to_string_lossy().to_string();
         let name = name.to_ns_name::<GenericNamespaced>()?;
-        LocalStream::connect(name)
+        LocalStream::connect(name).map_err(crate::platform::local_server_connection_error)
     }
 }
 

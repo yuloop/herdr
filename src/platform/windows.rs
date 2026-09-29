@@ -16,6 +16,19 @@ use std::{
 mod clipboard_image;
 mod config_backup;
 
+pub(crate) fn local_server_connection_error(error: std::io::Error) -> std::io::Error {
+    if error.kind() != std::io::ErrorKind::PermissionDenied {
+        return error;
+    }
+    std::io::Error::new(
+        error.kind(),
+        format!(
+            "If this server is elevated, stop it in an admin shell; \
+             reopen Herdr normally (closes panes). {error}"
+        ),
+    )
+}
+
 pub(crate) fn windows_virtual_terminal_input_active() -> bool {
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::System::Console::{

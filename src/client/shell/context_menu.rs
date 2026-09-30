@@ -42,6 +42,7 @@ impl ClientContextMenuOverlay {
             ],
             ClientContextMenuTarget::Workspace {
                 has_worktree_children: true,
+                close_group,
                 collapsed,
                 ..
             } => vec![
@@ -140,18 +141,13 @@ impl ClientShellState {
         let worktree = workspace.worktree.as_ref();
         let has_worktree_children = worktree.is_some_and(|worktree| {
             !worktree.is_linked_worktree
-                && snapshot
-                    .workspaces
-                    .iter()
-                    .filter(|candidate| {
-                        candidate
-                            .worktree
-                            .as_ref()
-                            .is_some_and(|candidate| candidate.key == worktree.key)
+                && snapshot.workspaces.iter().any(|candidate| {
+                    candidate.worktree.as_ref().is_some_and(|candidate| {
+                        candidate.key == worktree.key && candidate.is_linked_worktree
                     })
-                    .count()
-                    >= 2
+                })
         });
+        let close_group = super::sidebar::workspace_close_is_group(snapshot, workspace);
         let collapsed = worktree.is_some_and(|worktree| {
             self.group_is_collapsed(&self.active_endpoint_id, &worktree.key)
         });
@@ -161,6 +157,7 @@ impl ClientShellState {
                 is_git: worktree.is_some() || workspace.branch.is_some(),
                 is_linked_worktree: worktree.is_some_and(|worktree| worktree.is_linked_worktree),
                 has_worktree_children,
+                close_group,
                 collapsed,
             },
             x,
@@ -251,9 +248,11 @@ impl ClientShellState {
             return;
         };
         match menu.target {
-            ClientContextMenuTarget::Workspace { workspace_id, .. } => {
-                self.activate_workspace_context_action(workspace_id, action, outcome)
-            }
+            ClientContextMenuTarget::Workspace {
+                workspace_id,
+                close_group,
+                ..
+            } => self.activate_workspace_context_action(workspace_id, close_group, action, outcome),
             ClientContextMenuTarget::Tab {
                 tab_id,
                 workspace_id,
@@ -281,6 +280,7 @@ impl ClientShellState {
     fn activate_workspace_context_action(
         &mut self,
         workspace_id: String,
+        close_group: bool,
         action: ClientContextMenuAction,
         outcome: &mut ClientShellInput,
     ) {
@@ -307,19 +307,7 @@ impl ClientShellState {
                 }
             }
             ClientContextMenuAction::Close => {
-                if self.config.confirm_close {
-                    self.open_confirm_close_overlay(workspace_id);
-                } else {
-                    self.push_endpoint_method(
-                        crate::api::schema::Method::WorkspaceClose(
-                            crate::api::schema::WorkspaceCloseParams {
-                                workspace_id,
-                                close_group: true,
-                            },
-                        ),
-                        outcome,
-                    );
-                }
+                self.request_workspace_close(workspace_id, Some(close_group), outcome);
             }
             ClientContextMenuAction::NewWorktree => {
                 self.begin_worktree_action_for(KeybindAction::NewWorktree, workspace_id, outcome)

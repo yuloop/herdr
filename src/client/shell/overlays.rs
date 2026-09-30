@@ -569,11 +569,14 @@ fn render_onboarding_overlay(
     p: &Palette,
 ) -> Option<OverlayRender> {
     let prefix = k.primary_prefix_label();
+    // 汉化后缀要走 t!() 翻译，取一次字符串复用：算宽度和下面画按键行用的是同一份文本。
+    let prefix_suffix = crate::ui::onboarding_prefix_suffix();
+    let help_suffix = crate::ui::onboarding_help_suffix();
     let hint_width = display_width("  ")
         + display_width(&prefix)
-        + display_width(crate::ui::ONBOARDING_PREFIX_SUFFIX)
+        + display_width(prefix_suffix.as_str())
         + display_width(crate::ui::ONBOARDING_HELP_LABEL)
-        + display_width(crate::ui::ONBOARDING_HELP_SUFFIX);
+        + display_width(help_suffix.as_str());
     let outer = popup_with_width_cap(b.area, (hint_width + 5).max(64), 16, 3)?;
     let inner = panel(b, outer, p.accent, p.panel_bg)?;
     if inner.height < 11 {
@@ -620,8 +623,6 @@ fn render_onboarding_overlay(
         );
     }
 
-    let prefix_suffix = crate::ui::onboarding_prefix_suffix();
-    let help_suffix = crate::ui::onboarding_help_suffix();
     let key_y = content.y.saturating_add(4);
     let mut key_x = content.x;
     for (value, style) in [

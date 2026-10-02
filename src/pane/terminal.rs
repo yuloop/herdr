@@ -187,6 +187,8 @@ pub(crate) enum TerminalCompressionStep {
 
 pub(crate) struct GhosttyPaneTerminal {
     pub core: Mutex<GhosttyPaneCore>,
+    #[cfg(test)]
+    pub(super) scroll_metrics_reads: std::sync::atomic::AtomicUsize,
     key_encoder: Mutex<crate::ghostty::KeyEncoder>,
     pending_pty_responses: Arc<Mutex<Vec<Bytes>>>,
 }
@@ -1172,6 +1174,8 @@ impl GhosttyPaneTerminal {
             crate::ghostty::KeyEncoder::new().map_err(|e| std::io::Error::other(e.to_string()))?;
         key_encoder.set_from_terminal(&terminal);
         Ok(Self {
+            #[cfg(test)]
+            scroll_metrics_reads: std::sync::atomic::AtomicUsize::new(0),
             core: Mutex::new(GhosttyPaneCore {
                 #[cfg(test)]
                 dirty_collection_hook: None,
@@ -1805,6 +1809,9 @@ impl GhosttyPaneTerminal {
     }
 
     pub fn scroll_metrics(&self) -> Option<ScrollMetrics> {
+        #[cfg(test)]
+        self.scroll_metrics_reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let Ok(core) = self.core.lock() else {
             return None;
         };
@@ -3082,27 +3089,23 @@ fn ghostty_screen_row(
     y: u32,
 ) -> Result<String, crate::ghostty::Error> {
     let mut line = String::new();
-    // Resolve the scrollback page once per row rather than once per column.
-    for crate::ghostty::ScreenTextCell { wide, graphemes } in terminal
-        .screen_text_rows_range(y as usize, y as usize + 1)?
-        .into_iter()
-        .flat_map(|row| row.cells)
-    {
+    // Keep one page lookup per row and reuse grapheme storage across its cells.
+    terminal.for_each_screen_row_cell(y, |wide, graphemes| {
         if wide == crate::ghostty::CellWide::SpacerTail {
-            continue;
+            return;
         }
         if graphemes.is_empty()
             || graphemes.first().copied() == Some(crate::ghostty::KITTY_UNICODE_PLACEHOLDER)
         {
             line.push(' ');
         } else {
-            for codepoint in graphemes {
+            for &codepoint in graphemes {
                 if let Some(ch) = char::from_u32(codepoint) {
                     line.push(ch);
                 }
             }
         }
-    }
+    })?;
     Ok(line.trim_end().to_string())
 }
 

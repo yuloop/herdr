@@ -129,7 +129,7 @@ impl App {
         focus: bool,
         extra_env: Vec<(String, String)>,
     ) -> std::io::Result<usize> {
-        let (rows, cols) = self.state.estimate_pane_size();
+        let (rows, cols) = self.state.new_pane_size(crate::ui::NewPanePlacement::Alone);
         let (ws, terminal, runtime) = Workspace::new_with_extra_env(
             initial_cwd,
             rows,

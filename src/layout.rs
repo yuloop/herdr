@@ -864,7 +864,7 @@ fn build_main_pane(panes: &[PaneId], direction: Direction) -> Option<Node> {
     })
 }
 
-fn valid_split_ratio(ratio: f32) -> f32 {
+pub(crate) fn valid_split_ratio(ratio: f32) -> f32 {
     if ratio.is_finite() {
         ratio.clamp(0.1, 0.9)
     } else {

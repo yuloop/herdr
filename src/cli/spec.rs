@@ -851,6 +851,17 @@ fn plugin_command() -> Command {
                 .arg(required("plugin", "PLUGIN")),
         )
         .subcommand(
+            Command::new("update")
+                .about("Update GitHub-installed plugins")
+                .arg(Arg::new("plugins").value_name("PLUGIN").num_args(0..))
+                .arg(
+                    Arg::new("yes")
+                        .short('y')
+                        .long("yes")
+                        .action(ArgAction::SetTrue),
+                ),
+        )
+        .subcommand(
             Command::new("link")
                 .about(t!("cli.plugin_link_about").to_string())
                 .arg(path_arg("path", "PATH"))

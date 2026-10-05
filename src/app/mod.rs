@@ -118,6 +118,8 @@ pub struct App {
     pub(crate) git_refresh_in_flight: bool,
     pub(crate) git_refresh_due_after_in_flight: bool,
     pub(crate) git_identity_refresh_requested: bool,
+    pub(crate) pending_restored_worktree_spaces:
+        Vec<(String, crate::workspace::WorktreeSpaceMembership)>,
     pub(crate) git_status_cache: HashMap<std::path::PathBuf, crate::workspace::GitStatusCacheEntry>,
     pub(crate) pending_api_worktree_creates: HashMap<std::path::PathBuf, u64>,
     pub(crate) worktree_read_slots: std::sync::Arc<tokio::sync::Semaphore>,
@@ -158,6 +160,14 @@ pub struct App {
     pub(crate) config_reloaded_from_disk: bool,
     client_shell_keybindings_profile: Option<String>,
     endpoint_commands: custom_commands::EndpointCommandRegistry,
+    // Drop after terminal runtimes have shut down their processes. Command
+    // workers retain their own references until completion.
+    // ponytail: server-lifetime pins defer reclamation until restart; use
+    // per-pane leases only if reclamation during long-running sessions matters.
+    pub(crate) plugin_installation_leases: crate::plugin_installations::Leases,
+    // False when startup could not pin every installation; cleanup could
+    // otherwise reclaim files a restored consumer still uses.
+    pub(crate) plugin_installation_cleanup_allowed: bool,
 }
 
 pub(crate) const APP_EVENT_CHANNEL_CAPACITY: usize = 256;
@@ -173,11 +183,15 @@ fn background_update_check_enabled(background_updates: bool, check_enabled: bool
 
 fn load_plugin_registry(
     persist_plugin_registry: bool,
+    leases: &mut crate::plugin_installations::Leases,
 ) -> crate::app::state::InstalledPluginRegistry {
     if !persist_plugin_registry {
         return std::collections::HashMap::new();
     }
-    let entries = crate::persist::plugin_registry::load();
+    let entries = crate::plugin_installations::load(leases).unwrap_or_else(|err| {
+        tracing::warn!(%err, "failed to load plugin installations");
+        Vec::new()
+    });
     let entries = crate::persist::plugin_registry::reload_manifests(entries, |path, enabled| {
         crate::app::api::plugins::load_plugin_manifest(path, enabled).map_err(|(_, msg)| msg)
     });
@@ -354,6 +368,7 @@ pub(crate) fn client_palette_for_appearance(
 }
 
 impl App {
+    #[cfg(test)]
     pub fn new(
         config: &Config,
         policy: AppPolicy,
@@ -361,6 +376,17 @@ impl App {
         api_rx: tokio::sync::mpsc::UnboundedReceiver<crate::api::ApiRequestMessage>,
         event_hub: crate::api::EventHub,
     ) -> Self {
+        Self::try_new(config, policy, config_diagnostic, api_rx, event_hub)
+            .expect("test app startup")
+    }
+
+    pub fn try_new(
+        config: &Config,
+        policy: AppPolicy,
+        config_diagnostic: Option<String>,
+        api_rx: tokio::sync::mpsc::UnboundedReceiver<crate::api::ApiRequestMessage>,
+        event_hub: crate::api::EventHub,
+    ) -> std::io::Result<Self> {
         let prefix_keys = config.prefix_keys();
         crate::kitty_graphics::set_enabled(config.kitty_graphics_enabled());
         let (event_tx, event_rx) = mpsc::channel::<AppEvent>(APP_EVENT_CHANNEL_CAPACITY);
@@ -371,6 +397,23 @@ impl App {
         let mut restored_terminals = std::collections::HashMap::new();
         let mut restored_terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
         let snapshot = policy.restore_session.then(crate::persist::load).flatten();
+        let mut plugin_installation_leases = crate::plugin_installations::Leases::new();
+        let mut plugin_installation_cleanup_allowed = true;
+        if policy.persist_plugin_registry {
+            let restored_cwds = snapshot
+                .as_ref()
+                .into_iter()
+                .flat_map(|snapshot| &snapshot.workspaces)
+                .flat_map(|workspace| &workspace.tabs)
+                .flat_map(|tab| tab.panes.values())
+                .map(|pane| pane.cwd.clone())
+                .collect::<Vec<_>>();
+            plugin_installation_cleanup_allowed = crate::plugin_installations::retain_startup(
+                &mut plugin_installation_leases,
+                &restored_cwds,
+                false,
+            );
+        }
         let session_writer = Arc::new(std::sync::Mutex::new(crate::persist::SessionWriter::new(
             policy.restore_session && snapshot.is_none(),
         )));
@@ -514,7 +557,10 @@ impl App {
             integration_recommendations: crate::integration::integration_recommendations(),
             agent_manifest_summaries,
             agent_manifest_update_status: crate::detect::manifest_update::load_status(),
-            installed_plugins: load_plugin_registry(policy.persist_plugin_registry),
+            installed_plugins: load_plugin_registry(
+                policy.persist_plugin_registry,
+                &mut plugin_installation_leases,
+            ),
             plugin_panes: std::collections::HashMap::new(),
             popup_pane: None,
             plugin_command_logs: Vec::new(),
@@ -527,13 +573,6 @@ impl App {
         };
 
         state.terminals = restored_terminals;
-
-        for ws_idx in 0..state.workspaces.len() {
-            let cwd = state.workspaces[ws_idx]
-                .resolved_identity_cwd_from(&state.terminals, &restored_terminal_runtimes);
-            state.workspaces[ws_idx].cached_git_branch =
-                cwd.as_deref().and_then(crate::workspace::git_branch);
-        }
 
         // Background auto-update is disabled for non-persistent test apps
         // and in debug/test builds so local development never mutates the
@@ -566,6 +605,8 @@ impl App {
             custom_commands::EndpointCommandRegistry::new(&state.keybinds.custom_commands);
 
         let mut app = Self {
+            plugin_installation_leases,
+            plugin_installation_cleanup_allowed,
             config_diagnostic_deadline: None,
             toast_deadline: None,
             last_api_notification_at: None,
@@ -579,6 +620,7 @@ impl App {
             git_refresh_in_flight: false,
             git_refresh_due_after_in_flight: false,
             git_identity_refresh_requested: false,
+            pending_restored_worktree_spaces: Vec::new(),
             git_status_cache: HashMap::new(),
             pending_api_worktree_creates: HashMap::new(),
             worktree_read_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
@@ -627,7 +669,8 @@ impl App {
         };
         app.configure_tab_bar_status(&config.ui.tab_bar_right, &config.ui.tab_bar_right_separator);
         app.configure_window_title(&config.ui.window_title);
-        app
+        app.refresh_restored_workspace_git_metadata();
+        Ok(app)
     }
 
     #[cfg(unix)]
@@ -642,13 +685,20 @@ impl App {
             crate::handoff_runtime::ImportedHandoffRuntime,
         >,
     ) -> io::Result<Self> {
-        let mut app = Self::new(
+        let mut app = Self::try_new(
             config,
             AppPolicy::HANDOFF_REPLACEMENT,
             config_diagnostic,
             api_rx,
             event_hub,
-        );
+        )?;
+        if !crate::plugin_installations::retain_startup(
+            &mut app.plugin_installation_leases,
+            &[],
+            true,
+        ) {
+            app.plugin_installation_cleanup_allowed = false;
+        }
         let (workspaces, terminals, runtimes) = crate::persist::restore_handoff(
             snapshot,
             config.advanced.scrollback_limit_bytes,
@@ -682,6 +732,7 @@ impl App {
                 .get(idx)
                 .and_then(|ws| ws.focused_pane_id().map(|pane_id| (idx, pane_id)))
         });
+        app.refresh_restored_workspace_git_metadata();
         Ok(app)
     }
 

@@ -256,8 +256,8 @@ fn spawn_windows_client_accept_thread(
     listener: LocalListener,
     should_quit: Arc<AtomicBool>,
     server_event_tx: mpsc::Sender<ServerEvent>,
-) {
-    std::thread::spawn(move || {
+) -> io::Result<std::thread::JoinHandle<()>> {
+    crate::thread_spawn::spawn_named("herdr-client-accept", move || {
         let mut next_client_id = 1_u64;
         while !should_quit.load(Ordering::Acquire) {
             let stream = match listener.accept() {
@@ -282,7 +282,7 @@ fn spawn_windows_client_accept_thread(
 
             let should_quit = should_quit.clone();
             let server_event_tx = server_event_tx.clone();
-            std::thread::spawn(move || {
+            let spawned = crate::thread_spawn::spawn_named("herdr-client-conn", move || {
                 if let Err(err) = crate::server::client_transport::handle_client_handshake(
                     stream,
                     client_id,
@@ -292,8 +292,11 @@ fn spawn_windows_client_accept_thread(
                     debug!(client_id, err = %err, "client handshake failed");
                 }
             });
+            if let Err(err) = spawned {
+                warn!(client_id, err = %err, "failed to spawn client connection thread; dropping connection");
+            }
         }
-    });
+    })
 }
 
 impl HeadlessServer {
@@ -326,7 +329,7 @@ impl HeadlessServer {
         // Channel for server events from client threads.
         let (server_event_tx, server_event_rx) = mpsc::channel(64);
         #[cfg(windows)]
-        spawn_windows_client_accept_thread(listener, should_quit.clone(), server_event_tx.clone());
+        spawn_windows_client_accept_thread(listener, should_quit.clone(), server_event_tx.clone())?;
 
         let server_keybindings = app_keybindings(&app);
         let headless_size = app.state.headless_size;
@@ -590,7 +593,7 @@ impl HeadlessServer {
                 .next_headless_loop_deadline_with_git_refresh(
                     now,
                     needs_render,
-                    self.has_app_client(),
+                    self.git_refresh_scheduled(),
                 )
                 .map(|deadline| deadline.min(now + CLIENT_ACCEPT_POLL_INTERVAL))
                 .or(Some(now + CLIENT_ACCEPT_POLL_INTERVAL));
@@ -899,6 +902,12 @@ impl HeadlessServer {
 
     fn has_app_client(&self) -> bool {
         self.app_client_count() > 0
+    }
+
+    /// Periodic Git refresh follows attached clients. A refresh whose worker
+    /// failed to start still retries without one, so restored metadata settles.
+    fn git_refresh_scheduled(&self) -> bool {
+        self.has_app_client() || self.app.git_refresh_spawn_retry_pending
     }
 
     fn remove_client(&mut self, client_id: u64) -> bool {
@@ -3245,7 +3254,15 @@ impl HeadlessServer {
             }
         }
 
-        if self.has_app_client() {
+        if self
+            .app
+            .restored_worktree_validation_retry_at
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.app.start_restored_worktree_validation(now);
+        }
+
+        if self.git_refresh_scheduled() {
             self.app.start_git_status_refresh_if_due(now);
         }
 

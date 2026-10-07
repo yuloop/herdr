@@ -51,6 +51,8 @@ pub(super) struct ClientState {
     pub(super) kitty_graphics_enabled: bool,
     pub(super) pixel_geometry_enabled: bool,
     pub(super) pixel_geometry_exact: bool,
+    /// The host's answer to the SGR pixel mouse probe; None when unknown.
+    pub(super) host_sgr_pixel_mouse: Option<bool>,
     #[cfg(unix)]
     pub(super) direct_graphics_response: Arc<Mutex<direct_graphics::ResponseMatcher>>,
     #[cfg(unix)]
@@ -114,6 +116,7 @@ impl ClientState {
             kitty_graphics_enabled: false,
             pixel_geometry_enabled: false,
             pixel_geometry_exact: false,
+            host_sgr_pixel_mouse: None,
             #[cfg(unix)]
             direct_graphics_response: Default::default(),
             #[cfg(unix)]

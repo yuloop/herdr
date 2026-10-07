@@ -6037,6 +6037,75 @@ async fn client_shell_release_cleanup_does_not_promote_and_survives_disconnect()
     shutdown_test_runtimes(&mut server);
 }
 
+// Pixel mouse is a Unix client capability.
+#[cfg(unix)]
+#[tokio::test]
+async fn client_shell_requests_host_pixels_for_an_unfocused_pixel_pane() {
+    // #4750: host reports go to the pane under the pointer, focused or not.
+    let mut server = test_headless_server();
+    let mut workspace = crate::workspace::Workspace::test_new("pixel-split");
+    let first = workspace.tabs[0].root_pane;
+    let second = workspace.test_split(ratatui::layout::Direction::Horizontal);
+    let focused = workspace.focused_pane_id().expect("focused pane");
+    let unfocused = if focused == first { second } else { first };
+    workspace.insert_test_runtime(
+        focused,
+        crate::terminal::TerminalRuntime::test_with_screen_bytes(40, 23, b"plain"),
+    );
+    workspace.insert_test_runtime(
+        unfocused,
+        crate::terminal::TerminalRuntime::test_with_screen_bytes(
+            40,
+            23,
+            b"\x1b[?1003h\x1b[?1006h\x1b[?1016h",
+        ),
+    );
+    server.app.state.workspaces = vec![workspace];
+    server.app.state.active = Some(0);
+    server.app.state.selected = 0;
+    server.app.state.mode = crate::app::Mode::Terminal;
+    let (writer, control_rx, _render_rx) = test_client_writer();
+    assert!(
+        server.handle_server_event(ServerEvent::ClientShellConnected {
+            surface_reuse: false,
+            surface_delta: false,
+            surface_scroll: false,
+            client_id: 7,
+            surface_cols: 80,
+            surface_rows: 23,
+            cell_width_px: 10,
+            cell_height_px: 20,
+            pixel_mouse: true,
+            direct_graphics: false,
+            endpoint_keybindings: false,
+            mouse_capture: true,
+            surface_active: true,
+            writer,
+        })
+    );
+
+    // Control messages arrive asynchronously; wait for the mode instead of
+    // reading the channel once.
+    let mut mouse_modes = Vec::new();
+    for _ in 0..20 {
+        server.stream_host_mouse_capture_mode();
+        while let Ok(bytes) = control_rx.recv_timeout(Duration::from_millis(50)) {
+            if let ServerMessage::MouseCapture {
+                enabled,
+                sgr_pixels,
+            } = read_server_message(bytes)
+            {
+                mouse_modes.push((enabled, sgr_pixels));
+            }
+        }
+        if mouse_modes.last() == Some(&(true, true)) {
+            break;
+        }
+    }
+    assert_eq!(mouse_modes.last(), Some(&(true, true)), "{mouse_modes:?}");
+    shutdown_test_runtimes(&mut server);
+}
+
 #[test]
 fn client_shell_mouse_capture_combines_local_preference_with_endpoint_demand() {
     let mut server = test_headless_server();
@@ -6222,11 +6291,12 @@ fn direct_terminal_streams_child_keyboard_and_mouse_modes() {
             read_server_message(
                 client_control_rx
                     .recv_timeout(Duration::from_millis(100))
-                    .expect("modifyOtherKeys mode-one keyboard message")
+                    .expect("kitty flags change with modifyOtherKeys mode one")
             ),
+            // Like Ghostty, modifyOtherKeys level 1 is not a negotiated mode.
             ServerMessage::DirectTerminalKeyboardProtocol {
                 flags: 3,
-                modify_other_keys_level: 1
+                modify_other_keys_level: 0
             }
         ));
 

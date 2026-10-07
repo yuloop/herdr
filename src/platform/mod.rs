@@ -207,6 +207,15 @@ pub(crate) const fn capabilities() -> PlatformCapabilities {
     }
 }
 
+/// The byte the host terminal sends for Backspace according to the tty's erase
+/// setting (e.g. `^H` for MobaXterm and PuTTY-style terminals), when known.
+pub(crate) fn terminal_erase_byte() -> Option<u8> {
+    #[cfg(unix)]
+    return unix_common::terminal_erase_byte();
+    #[cfg(not(unix))]
+    None
+}
+
 pub(crate) fn terminal_grid_size() -> std::io::Result<(u16, u16)> {
     #[cfg(unix)]
     let (cols, rows) = unix_common::read_terminal_grid_size()?;

@@ -3021,13 +3021,19 @@ impl Drop for RenderState {
 
 pub struct KeyEvent {
     raw: ffi::GhosttyKeyEvent,
+    // libghostty borrows the UTF-8 pointer instead of copying it, so the event
+    // owns the text for as long as the handle can be encoded.
+    utf8: Box<str>,
 }
 
 impl KeyEvent {
     pub fn new() -> Result<Self, Error> {
         let mut raw = ptr::null_mut();
         unsafe { ffi::ghostty_key_event_new(ptr::null(), &mut raw).into_result()? };
-        Ok(Self { raw })
+        Ok(Self {
+            raw,
+            utf8: Box::from(""),
+        })
     }
 
     pub fn set_action(&mut self, action: ffi::GhosttyKeyAction) {
@@ -3043,13 +3049,26 @@ impl KeyEvent {
     }
 
     pub fn set_utf8(&mut self, text: &str) {
+        self.utf8 = Box::from(text);
         unsafe {
-            ffi::ghostty_key_event_set_utf8(self.raw, text.as_ptr().cast::<c_char>(), text.len())
+            ffi::ghostty_key_event_set_utf8(
+                self.raw,
+                self.utf8.as_ptr().cast::<c_char>(),
+                self.utf8.len(),
+            )
         }
     }
 
     pub fn set_unshifted_codepoint(&mut self, codepoint: u32) {
         unsafe { ffi::ghostty_key_event_set_unshifted_codepoint(self.raw, codepoint) }
+    }
+
+    pub fn set_consumed_mods(&mut self, mods: u16) {
+        unsafe { ffi::ghostty_key_event_set_consumed_mods(self.raw, mods) }
+    }
+
+    pub fn set_composing(&mut self, composing: bool) {
+        unsafe { ffi::ghostty_key_event_set_composing(self.raw, composing) }
     }
 }
 
@@ -3072,6 +3091,23 @@ impl KeyEncoder {
 
     pub fn set_from_terminal(&mut self, terminal: &Terminal) {
         unsafe { ffi::ghostty_key_encoder_setopt_from_terminal(self.raw, terminal.raw()) }
+    }
+
+    /// Whether macOS Option acts as Alt (ESC prefix) rather than a text
+    /// modifier. `set_from_terminal` resets this to false.
+    pub fn set_macos_option_as_alt(&mut self, enabled: bool) {
+        let value = if enabled {
+            ffi::GhosttyOptionAsAlt_GHOSTTY_OPTION_AS_ALT_TRUE
+        } else {
+            ffi::GhosttyOptionAsAlt_GHOSTTY_OPTION_AS_ALT_FALSE
+        };
+        unsafe {
+            ffi::ghostty_key_encoder_setopt(
+                self.raw,
+                ffi::GhosttyKeyEncoderOption_GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT,
+                (&value as *const ffi::GhosttyOptionAsAlt).cast(),
+            )
+        }
     }
 
     pub fn encode(&mut self, event: &KeyEvent) -> Result<Vec<u8>, Error> {

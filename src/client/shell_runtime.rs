@@ -100,6 +100,9 @@ pub(super) fn sync_client_shell_keyboard_report_all(
     crate::terminal_modes::set_host_kitty_keyboard_report_all(&mut io::stdout(), desired)
         .map_err(ClientError::ConnectionFailed)?;
     state.keyboard_report_all_active = desired;
+    if let Some(shell) = state.shell.as_mut() {
+        shell.set_host_reports_all_keys(desired);
+    }
     Ok(())
 }
 
@@ -115,7 +118,12 @@ pub(super) fn clear_endpoint_host_effects(
     } else {
         state.direct_mouse_capture_preference
     };
-    let sgr_pixels = super::effective_sgr_pixel_mouse(enabled, false, state.pixel_geometry_exact);
+    let sgr_pixels = super::effective_sgr_pixel_mouse(
+        enabled,
+        false,
+        state.pixel_geometry_exact,
+        state.host_sgr_pixel_mouse,
+    );
     if enabled != state.mouse_capture_active
         || sgr_pixels != host_sgr_pixels_active.load(std::sync::atomic::Ordering::Acquire)
     {

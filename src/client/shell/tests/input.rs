@@ -282,6 +282,216 @@ fn invalid_experimental_reload_keeps_input_source_preference() {
     assert!(!shell.switch_ascii_input_source_in_prefix);
 }
 
+fn pane_key_events(
+    outcome: &ClientShellInput,
+) -> Vec<(
+    crate::protocol::ClientKeyCode,
+    crate::protocol::ClientKeyKind,
+)> {
+    outcome
+        .requests
+        .iter()
+        .filter_map(|request| match request {
+            ClientMessage::ClientShellPaneInput { events, .. } => Some(events),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|event| match event {
+            ClientPaneInputEvent::Key { code, kind, .. } => Some((code.clone(), *kind)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn text_press_release_survives_shift_released_first_and_never_becomes_a_repeat() {
+    use crate::protocol::{ClientKeyCode, ClientKeyKind};
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_host_reports_key_releases(true);
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+
+    // Shift+A arrives as text; Shift is let go before A, so the release names
+    // plain `a` with no shifted alternate.
+    let press = state.handle_input_bytes(b"A");
+    assert_eq!(
+        pane_key_events(&press),
+        [(ClientKeyCode::Char('A'), ClientKeyKind::Press)]
+    );
+    let release = state.handle_input_bytes(b"\x1b[97;1:3u");
+    assert_eq!(
+        pane_key_events(&release),
+        [(ClientKeyCode::Char('a'), ClientKeyKind::Release)]
+    );
+
+    // A text press whose release never arrived must not turn the next press
+    // into a repeat routed to the old target.
+    let _ = state.handle_input_bytes(b"%");
+    let again = state.handle_input_bytes(b"%");
+    assert_eq!(
+        pane_key_events(&again),
+        [(ClientKeyCode::Char('%'), ClientKeyKind::Press)]
+    );
+}
+
+#[test]
+fn raw_backspace_follows_the_host_tty_erase_character() {
+    use crate::protocol::{ClientKeyCode, ClientKeyKind};
+
+    // #3244: MobaXterm sends 0x08 for Backspace and its tty says erase is ^H.
+    for (erase, plain, alt) in [
+        (
+            Some(0x08),
+            ClientKeyCode::Backspace,
+            ClientKeyCode::Backspace,
+        ),
+        (
+            Some(0x7f),
+            ClientKeyCode::Char('h'),
+            ClientKeyCode::Char('h'),
+        ),
+        (None, ClientKeyCode::Char('h'), ClientKeyCode::Char('h')),
+    ] {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.set_host_erase_byte(erase);
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+
+        let press = state.handle_input_bytes(b"\x08");
+        assert_eq!(
+            pane_key_events(&press),
+            [(plain.clone(), ClientKeyKind::Press)],
+            "erase {erase:?}"
+        );
+        let alt_press = state.handle_input_bytes(b"\x1b\x08");
+        assert_eq!(
+            pane_key_events(&alt_press),
+            [(alt, ClientKeyKind::Press)],
+            "alt, erase {erase:?}"
+        );
+    }
+}
+
+#[test]
+fn shifted_punctuation_release_after_shift_reaches_the_pane() {
+    use crate::protocol::{ClientKeyCode, ClientKeyKind};
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_host_reports_key_releases(true);
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+
+    // "?" arrives as text; with Shift let go first the release names only the
+    // unshifted key, which no layout-free rule can relate to "?".
+    let _ = state.handle_input_bytes(b"?");
+    let release = state.handle_input_bytes(b"\x1b[47;1:3u");
+    assert_eq!(
+        pane_key_events(&release),
+        [(ClientKeyCode::Char('/'), ClientKeyKind::Release)]
+    );
+    // Nothing is left to be released later as a stale "?".
+    let blur = state.handle_input_bytes(b"\x1b[O");
+    assert!(pane_key_events(&blur).is_empty());
+
+    // With two text keys held the release is ambiguous and nothing is taken.
+    let _ = state.handle_input_bytes(b"?");
+    let _ = state.handle_input_bytes(b"!");
+    let ambiguous = state.handle_input_bytes(b"\x1b[47;1:3u");
+    assert!(pane_key_events(&ambiguous).is_empty());
+}
+
+#[test]
+fn held_key_reports_keep_their_release_around_ime_commits_and_focus_loss() {
+    use crate::protocol::{ClientKeyCode, ClientKeyKind};
+
+    let new_state = || {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.set_host_reports_key_releases(true);
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        state
+    };
+
+    // A key report carrying its text (report-all host) is a real held key:
+    // losing focus releases it.
+    let mut state = new_state();
+    let _ = state.handle_input_bytes(b"\x1b[97;;97u");
+    let blur = state.handle_input_bytes(b"\x1b[O");
+    assert_eq!(
+        pane_key_events(&blur),
+        [(ClientKeyCode::Char('a'), ClientKeyKind::Release)]
+    );
+
+    // Many IME commits while a key is held never displace that key: its
+    // release still reaches the pane as the held key.
+    let mut state = new_state();
+    let _ = state.handle_input_bytes(b"\x1b[120;;120u");
+    for ch in
+        "\u{65e5}\u{672c}\u{8a9e}\u{d55c}\u{ad6d}\u{c5b4}\u{4e2d}\u{6587}\u{3042}\u{3044}\u{3046}"
+            .chars()
+    {
+        let _ = state.handle_input_bytes(ch.to_string().as_bytes());
+    }
+    let release = state.handle_input_bytes(b"\x1b[120;1:3u");
+    assert_eq!(
+        pane_key_events(&release),
+        [(ClientKeyCode::Char('x'), ClientKeyKind::Release)]
+    );
+}
+
+#[test]
+fn non_latin_ctrl_chord_release_matches_after_ctrl_is_let_go() {
+    use crate::protocol::{ClientKeyCode, ClientKeyKind};
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_host_reports_key_releases(true);
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+
+    // Russian layout: Ctrl+\u{441} is the C key; Ctrl goes up before C.
+    let press = state.handle_input_bytes(b"\x1b[1089::99;5u");
+    assert_eq!(
+        pane_key_events(&press),
+        [(ClientKeyCode::Char('c'), ClientKeyKind::Press)]
+    );
+    let release = state.handle_input_bytes(b"\x1b[1089::99;1:3u");
+    assert_eq!(
+        pane_key_events(&release),
+        [(ClientKeyCode::Char('c'), ClientKeyKind::Release)]
+    );
+
+    // Plain Cyrillic typing still releases as its own key.
+    let _ = state.handle_input_bytes(b"\x1b[1089::99;;1089u");
+    let release = state.handle_input_bytes(b"\x1b[1089::99;1:3u");
+    assert_eq!(
+        pane_key_events(&release),
+        [(ClientKeyCode::Char('\u{441}'), ClientKeyKind::Release)]
+    );
+}
+
+#[test]
+fn unmatched_release_never_takes_a_held_key_while_herdr_owns_another_press() {
+    use crate::protocol::{ClientKeyCode, ClientKeyKind};
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_host_reports_key_releases(true);
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+
+    // Hold `a` in the pane, then press the prefix: Herdr owns that press.
+    let _ = state.handle_input_bytes(b"a");
+    let _ = state.handle_input_bytes(b"\x1b[98;5u");
+    // A release the leases cannot name must not be charged to the held `a`.
+    let stray = state.handle_input_bytes(b"\x1b[47;1:3u");
+    assert!(pane_key_events(&stray).is_empty());
+    let release = state.handle_input_bytes(b"\x1b[97;1:3u");
+    assert_eq!(
+        pane_key_events(&release),
+        [(ClientKeyCode::Char('a'), ClientKeyKind::Release)]
+    );
+}
+
 #[test]
 fn physical_release_uses_the_leased_press_code_with_current_modifiers() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));

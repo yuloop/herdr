@@ -74,6 +74,7 @@ pub(crate) const PANE_TERM: &str = crate::ghostty::TERM;
 pub(crate) const MIN_PANE_ROWS: u16 = 2;
 pub(crate) const MIN_PANE_COLS: u16 = 4;
 const PANE_COLORTERM: &str = "truecolor";
+const FISH_HANDLE_REFLOW_ENV_VAR: &str = "fish_handle_reflow";
 
 fn terminal_compression_permits() -> Arc<tokio::sync::Semaphore> {
     static PERMITS: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
@@ -105,6 +106,16 @@ fn apply_pane_terminal_env(cmd: &mut CommandBuilder) {
     cmd.env("COLORTERM", PANE_COLORTERM);
     cmd.env("TERM_PROGRAM", "herdr");
     cmd.env("TERM_PROGRAM_VERSION", crate::build_info::version());
+    // fish only skips its own resize repaint for terminals it recognizes as
+    // reflowing. Herdr reflows too, and the competing repaint glues prompt copies.
+    // Match the exact casing: Windows env keys are case-insensitive here, but
+    // MSYS/Cygwin fish only reads the lowercase name.
+    if !cmd
+        .iter_full_env_as_str()
+        .any(|(key, _)| key == FISH_HANDLE_REFLOW_ENV_VAR)
+    {
+        cmd.env(FISH_HANDLE_REFLOW_ENV_VAR, "0");
+    }
     // Host handles refer to the outer terminal, never to this pane.
     for key in [
         "ITERM_SESSION_ID",
@@ -3972,6 +3983,8 @@ impl PaneRuntime {
         let (resize_tx, _resize_rx) = watch::channel((rows, cols, 0, 0));
         let mut terminal =
             crate::ghostty::Terminal::new(cols, rows, scrollback_limit_bytes).unwrap();
+        // Runtime fixtures model the default config, which enables graphics.
+        terminal.enable_kitty_graphics().unwrap();
         terminal.write(bytes);
         let pane_id = PaneId::from_raw(0);
         let terminal = Arc::new(PaneTerminal::new(
@@ -4183,6 +4196,55 @@ mod tests {
         assert_eq!(
             cmd.get_env("TERM_PROGRAM_VERSION"),
             Some(OsStr::new(&crate::build_info::version()))
+        );
+    }
+
+    #[test]
+    fn pane_terminal_env_tells_fish_that_herdr_reflows() {
+        let mut cmd = CommandBuilder::new("shell");
+        cmd.env_remove(FISH_HANDLE_REFLOW_ENV_VAR);
+        apply_pane_terminal_env(&mut cmd);
+        assert_eq!(
+            cmd.get_env(FISH_HANDLE_REFLOW_ENV_VAR),
+            Some(OsStr::new("0"))
+        );
+    }
+
+    #[test]
+    fn pane_terminal_env_keeps_existing_fish_handle_reflow_entry() {
+        let mut cmd = CommandBuilder::new("shell");
+        cmd.env(FISH_HANDLE_REFLOW_ENV_VAR, "1");
+        apply_pane_terminal_env(&mut cmd);
+        apply_pane_launch_env(&mut cmd, &PaneLaunchEnv::default());
+        assert_eq!(
+            cmd.get_env(FISH_HANDLE_REFLOW_ENV_VAR),
+            Some(OsStr::new("1"))
+        );
+    }
+
+    #[test]
+    fn pane_terminal_env_sets_lowercase_fish_handle_reflow_beside_other_casing() {
+        let mut cmd = CommandBuilder::new("shell");
+        cmd.env_remove(FISH_HANDLE_REFLOW_ENV_VAR);
+        cmd.env("FISH_HANDLE_REFLOW", "1");
+        apply_pane_terminal_env(&mut cmd);
+        assert!(cmd
+            .iter_full_env_as_str()
+            .any(|entry| entry == (FISH_HANDLE_REFLOW_ENV_VAR, "0")));
+    }
+
+    #[test]
+    fn pane_launch_env_explicit_fish_handle_reflow_wins() {
+        let mut explicit = CommandBuilder::new("shell");
+        explicit.env_remove(FISH_HANDLE_REFLOW_ENV_VAR);
+        apply_pane_terminal_env(&mut explicit);
+        apply_pane_launch_env(
+            &mut explicit,
+            &PaneLaunchEnv::from_extra(vec![(FISH_HANDLE_REFLOW_ENV_VAR.into(), "1".into())]),
+        );
+        assert_eq!(
+            explicit.get_env(FISH_HANDLE_REFLOW_ENV_VAR),
+            Some(OsStr::new("1"))
         );
     }
 
@@ -6322,6 +6384,57 @@ mod tests {
         )
         .await
         .expect("re-entering active authority should notify detection reset");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spawned_pane_process_sees_fish_handle_reflow() {
+        let output_dir = std::env::temp_dir().join(format!(
+            "herdr-fish-handle-reflow-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&output_dir).unwrap();
+        let output_path = output_dir.join("out.txt");
+        let (events, _event_rx) = mpsc::channel(8);
+        // The cwd keeps the temp path out of the shell command line.
+        let runtime = PaneRuntime::spawn_shell_command(
+            PaneId::from_raw(42),
+            24,
+            80,
+            output_dir.clone(),
+            "printf '%s\\n' \"$fish_handle_reflow\" > out.txt",
+            &PaneLaunchEnv::default(),
+            AgentDetection::Disabled,
+            0,
+            crate::terminal_theme::TerminalTheme::default(),
+            None,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        )
+        .unwrap();
+
+        let output = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(output) = std::fs::read_to_string(&output_path) {
+                    if output.ends_with('\n') {
+                        break output;
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("pane process should write its env");
+        runtime.shutdown();
+        let _ = std::fs::remove_dir_all(&output_dir);
+
+        let expected = std::env::var(FISH_HANDLE_REFLOW_ENV_VAR).unwrap_or_else(|_| "0".into());
+        assert_eq!(output, format!("{expected}\n"));
     }
 
     #[cfg(unix)]

@@ -17,8 +17,16 @@ pub(super) fn dispatch_client_shell_actions(
                 boot_id,
                 request,
             } => {
-                if let Some(connection) = endpoints.connection(&endpoint_id).filter(|_| {
-                    endpoints.active_id() == &endpoint_id && endpoints.active_surface_available()
+                if let Some(connection) = endpoints.connection(&endpoint_id).filter(|connection| {
+                    endpoints.active_id() == &endpoint_id
+                        && (endpoints.active_surface_available()
+                            // The coherent target is visible before its input fence opens.
+                            // Retain workspace navigation; sending remains gated below.
+                            || (connection.surface_active
+                                && matches!(
+                                    request.method,
+                                    crate::api::schema::Method::WorkspaceFocus(_)
+                                )))
                 }) {
                     endpoint_commands.enqueue(endpoint_id, connection.generation, boot_id, request);
                 } else if let Some(shell) = shell.as_deref_mut() {
@@ -163,10 +171,11 @@ fn install_pending_activation(
     next_surface_serial: &mut u64,
     activation: endpoint::PendingEndpointActivation,
 ) {
-    let retired = activation
-        .source_command_lane()
-        .map(|source| endpoint_commands.retire_lane(source))
-        .unwrap_or_default();
+    // A fresh target epoch must not replay navigation retained by an abandoned handoff.
+    let mut retired = endpoint_commands.retire_lane(activation.target());
+    if let Some(source) = activation.source_command_lane() {
+        retired.extend(endpoint_commands.retire_lane(source));
+    }
     if let Some(shell) = state.shell.as_mut() {
         for request_id in retired {
             shell.cancel_endpoint_request(&request_id);

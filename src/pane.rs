@@ -3793,14 +3793,14 @@ impl PaneRuntime {
         }
 
         let pid = self.child_pid.load(Ordering::Relaxed);
-        crate::platform::process_cwd(pid)
+        crate::platform::pane_process_cwd(pid)
     }
 
     pub fn cwd_for_persistence(&self) -> Option<std::path::PathBuf> {
         let pid = self.child_pid.load(Ordering::Acquire);
         let exited = self.cwd_process_exited.load(Ordering::Acquire);
         if let Some(cwd) = (!exited)
-            .then(|| crate::platform::process_cwd(pid))
+            .then(|| crate::platform::pane_process_cwd(pid))
             .flatten()
             .filter(|cwd| cwd.is_absolute())
         {
